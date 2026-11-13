@@ -120,7 +120,7 @@ Ask what is going on with your Mac and get an answer based on a snapshot of the 
 
 ## Install
 
-Open `Dotmeter-<version>.dmg` and drag Dotmeter onto Applications.
+Download the latest `Dotmeter-<version>.dmg` from the [Releases page](https://github.com/ysrdevs/dotmeter/releases/latest), open it and drag Dotmeter onto Applications. The app is signed and notarized by Apple.
 
 <p align="center">
   <img src="docs/dmg-window-preview.png" width="420" alt="The install window">
