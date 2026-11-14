@@ -180,3 +180,7 @@ docs                     Screenshots and technical notes
 ```
 
 More detail on how each reading is taken, performance, the uninstaller's rules and the debug switches is in [docs/NOTES.md](docs/NOTES.md).
+
+## License
+
+Dotmeter is open source under the [MIT License](LICENSE).
