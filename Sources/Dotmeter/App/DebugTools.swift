@@ -429,6 +429,8 @@ enum DebugTools {
             openAISelfTest()
         case "dashboard":
             dashboardSelfTest()
+        case "storage":
+            await storageSelfTest(models: models)
         case "uninstall":
             await uninstallSelfTest()
         default:
@@ -547,6 +549,85 @@ enum DebugTools {
         let appleFailures = await Uninstaller.delete(applePlan, helper: { $0.map { _ in "no helper in this test" } }) { _ in }
         check("it uninstalls like any other app", appleFailures.isEmpty && apple.made.allSatisfy { !FileManager.default.fileExists(atPath: $0) }, appleFailures)
         check("and the plain-name folder is still there", apple.kept.allSatisfy { FileManager.default.fileExists(atPath: $0) })
+        print(failed == 0 ? "all checks pass" : "\(failed) FAILED")
+    }
+
+    /// The storage figures on a made-up disk that fills and empties after it was scanned. Nothing of the
+    /// user's is read or saved: the model is told not to remember.
+    @MainActor
+    private static func storageSelfTest(models: AppModels) async {
+        var failed = 0
+        func check(_ name: String, _ ok: Bool, _ got: Any = "") {
+            if !ok { failed += 1 }
+            print("\(ok ? "ok  " : "FAIL") \(name)\(ok ? "" : " (got \(got))")")
+        }
+        func near(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 2e7 }
+        func item(_ section: AppSection, _ storage: StorageModel) -> [String] {
+            MenuBarRenderer.content(for: section, snapshot: Collectors().collect(), history: [], storage: storage).lines
+        }
+        let disk = MadeUpDisk(capacity: 1000e9, free: 600e9)
+        let storage = StorageModel(backend: disk, remembers: false)
+        check("before a scan, used is what the disk says", near(storage.usedBytes, 400e9), storage.usedBytes)
+        disk.free = 550e9
+        storage.follow(free: 550_000_000_000)
+        check("and it follows the disk filling up", near(storage.usedBytes, 450e9), storage.usedBytes)
+        check("the menu bar says so", item(.storage, storage) == ["U 450 GB", "F 550 GB"], item(.storage, storage))
+
+        storage.scan()
+        for _ in 0..<100 where storage.phase != .ready { try? await Task.sleep(for: .milliseconds(50)) }
+        func part(_ id: String) -> Double { storage.meter.items.first { $0.id == id }.map { $0.number * 1e9 } ?? -1 }
+        check("a scan leaves the folders and the rest as System data", storage.phase == .ready && near(part("apps"), 100e9) && near(part("system"), 300e9), "\(storage.phase) \(part("apps")) \(part("system"))")
+
+        disk.free = 380e9
+        storage.follow(free: 380_000_000_000)
+        check("after a scan, used still follows the disk filling up", near(storage.usedBytes, 620e9), storage.usedBytes)
+        check("the menu bar says so", item(.storage, storage) == ["U 620 GB", "F 380 GB"], item(.storage, storage))
+        check("what was added since is System data until the next scan", near(part("system"), 470e9) && near(part("apps"), 100e9), part("system"))
+        check("the card agrees", storage.meter.status == .plain("380.0 GB available"), storage.meter.status)
+
+        let before = storage.meter.number
+        storage.follow(free: 380_004_000_000)
+        check("a few megabytes change nothing", storage.meter.number == before)
+
+        disk.free = 900e9
+        storage.follow(free: 900_000_000_000)
+        check("emptied below what the folders came to, used is still the disk's", near(storage.usedBytes, 100e9), storage.usedBytes)
+        let bar = storage.meter.items.filter { $0.id != "unmeasured" }.reduce(0.0) { $0 + $1.amount }
+        check("and the bar does not draw more than is used", near(bar, 100e9), bar)
+        check("the menu bar says so", item(.storage, storage) == ["U 100 GB", "F 900 GB"], item(.storage, storage))
+
+        // The real disk, through the app's own wiring: the running monitor reads it and the storage figures follow.
+        // The only thing written is a file this test makes in the temporary folder and deletes again; the saved
+        // scan is read, never saved.
+        func diskUsed() -> Double {
+            var fs = statfs()
+            guard statfs("/", &fs) == 0 else { return 0 }
+            return Double(UInt64(fs.f_blocks) * UInt64(fs.f_bsize)) - Double(UInt64(fs.f_bavail) * UInt64(fs.f_bsize))
+        }
+        func settles(_ ok: @escaping () -> Bool) async -> Bool {
+            for _ in 0..<70 where !ok() { try? await Task.sleep(for: .milliseconds(500)) }
+            return ok()
+        }
+        let real = models.storage
+        let agrees = { abs(real.usedBytes - diskUsed()) < 1e8 }
+        let atStart = await settles { models.monitor.latest != nil && agrees() }
+        let first = real.usedBytes
+        check("the real disk: used is what the disk says (\(real.phase))", atStart, "\(StorageModel.gb(real.usedBytes)) against \(StorageModel.gb(diskUsed()))")
+        let file = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("dotmeter-storage-test-\(getpid())")
+        FileManager.default.createFile(atPath: file.path, contents: nil)
+        if let handle = try? FileHandle(forWritingTo: file) {
+            let chunk = Data((0..<8_388_608).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ 7) })
+            for _ in 0..<50 { try? handle.write(contentsOf: chunk) }
+            try? handle.synchronize()
+            try? handle.close()
+        }
+        let grew = await settles { real.usedBytes - first > 3e8 && agrees() }
+        check("it follows 400 MB being written", grew, "\(StorageModel.gb(first)) then \(StorageModel.gb(real.usedBytes)), disk \(StorageModel.gb(diskUsed()))")
+        let full = real.usedBytes
+        try? FileManager.default.removeItem(at: file)
+        let shrank = await settles { full - real.usedBytes > 3e8 && agrees() }
+        check("and being deleted again", shrank, "\(StorageModel.gb(full)) then \(StorageModel.gb(real.usedBytes)), disk \(StorageModel.gb(diskUsed()))")
+        print(String(format: "     real disk: %.2f GB used at the start, %.2f with the file, %.2f after", first / 1e9, full / 1e9, real.usedBytes / 1e9))
         print(failed == 0 ? "all checks pass" : "\(failed) FAILED")
     }
 
@@ -1124,4 +1205,28 @@ final class ProgressLog: @unchecked Sendable {
     private var stored: [Double] = []
     func add(_ value: Double) { lock.lock(); stored.append(value); lock.unlock() }
     var values: [Double] { lock.lock(); defer { lock.unlock() }; return stored }
+}
+
+/// A disk for the storage self-test: its free space is whatever the test says, and a scan finds two folders.
+private final class MadeUpDisk: StorageBackend, @unchecked Sendable {
+    private let lock = NSLock()
+    private let capacity: Double
+    private var space: Double
+    var free: Double {
+        get { lock.withLock { space } }
+        set { lock.withLock { space = newValue } }
+    }
+
+    init(capacity: Double, free: Double) {
+        self.capacity = capacity
+        space = free
+    }
+
+    var isDemo: Bool { false }
+    func volume() -> StorageVolume { StorageVolume(capacity: capacity, free: free, purgeable: 0, name: "Made up", format: "APFS") }
+    func scan(update: @escaping @Sendable (StorageScanUpdate) -> Void) async -> StorageScanResult {
+        StorageScanResult(bytes: ["apps": 100e9, "documents": 50e9])
+    }
+    func clear(_ id: String, children: [StorageChild], update: @escaping @Sendable (_ path: String, _ freed: Double) -> Void) async -> Double { 0 }
+    func remove(_ item: StorageChild, permanently: Bool, progress: @escaping @Sendable (Double) -> Void) async -> RemovalFailure? { nil }
 }

@@ -23,6 +23,10 @@ final class AppModels {
         speed.store = timeline
         speed.load(timeline.speedTests)
         monitor.addObserver { [weak quit] snapshot in quit?.reconcile(with: snapshot.apps) }
+        // The disk is read on every tick; the storage figures, in the menu bar and everywhere else, follow it.
+        monitor.addObserver { [weak storage] snapshot in
+            if snapshot.disk.total > 0 { storage?.follow(free: snapshot.disk.free) }
+        }
         // A followed cable's record builds whether or not the USB area is open: the ports are read when something
         // is plugged in or pulled out, and once a minute besides, for as long as any cable is being followed.
         // A connection that comes up slower than it could is written to the Timeline, so the ports are read when

@@ -51,12 +51,15 @@ final class StorageModel {
     @ObservationIgnored private var disarmTask: Task<Void, Never>?
     @ObservationIgnored private let backend: StorageBackend
     @ObservationIgnored private let symbols: [String: String]
+    /// False for a model made to be tested: it neither reads the saved scan nor saves one.
+    @ObservationIgnored private let remembers: Bool
 
     private static let cacheKey = "storageScan.v2"
 
-    init(backend: StorageBackend? = nil) {
+    init(backend: StorageBackend? = nil, remembers: Bool = true) {
         let demo = ProcessInfo.processInfo.environment["DOTMETER_STORAGE_DEMO"] == "1"
         self.backend = backend ?? (demo ? DemoStorageBackend() : DiskStorageBackend())
+        self.remembers = remembers
         var resolved: [String: String] = [:]
         for info in StorageCategoryInfo.all {
             resolved[info.id] = info.symbols.first { NSImage(systemSymbolName: $0, accessibilityDescription: nil) != nil } ?? "square.fill"
@@ -104,7 +107,7 @@ final class StorageModel {
                 // DOTMETER_DEBUG_BUSY_ROW_ONLY=1 leaves the card's bar at rest, to measure the row's animation alone.
                 if ProcessInfo.processInfo.environment["DOTMETER_DEBUG_BUSY_ROW_ONLY"] != "1" { phase = .clearing("caches") }
             }
-        } else if let data = UserDefaults.standard.data(forKey: Self.cacheKey), let cache = try? JSONDecoder().decode(Cache.self, from: data) {
+        } else if remembers, let data = UserDefaults.standard.data(forKey: Self.cacheKey), let cache = try? JSONDecoder().decode(Cache.self, from: data) {
             bytes = cache.bytes
             details = cache.details
             children = cache.children
@@ -128,7 +131,7 @@ final class StorageModel {
     }
 
     private func persist() {
-        guard !backend.isDemo else { return }
+        guard !backend.isDemo, remembers else { return }
         let cache = Cache(bytes: bytes, details: details, children: children, denied: denied, scannedAt: scannedAt, sharedSkipped: sharedSkipped, libraryBytes: libraryBytes)
         if let data = try? JSONEncoder().encode(cache) { UserDefaults.standard.set(data, forKey: Self.cacheKey) }
     }
@@ -137,8 +140,26 @@ final class StorageModel {
 
     private var used: Double { max(0, capacity - available) }
     private var measured: Double { bytes.filter { $0.key != "system" }.values.reduce(0, +) }
+    /// What is used. At rest that is what the disk says now, never what the folders came to when they were
+    /// last measured; while a scan fills in or something is being cleared it is the folders so far.
     private var shownTotal: Double {
-        phase == .unscanned ? used : min(bytes.values.reduce(0, +), capacity)
+        phase == .unscanned ? used : min(bytes.values.reduce(0, +), backend.isDemo ? capacity : used)
+    }
+
+    /// Called with each reading of the startup disk's free space. The disk fills and empties while the app
+    /// runs, so the figures follow it. Whatever changed since the last scan is kept in System data, the
+    /// remainder, until the next scan says where it went.
+    func follow(free: UInt64) {
+        guard !backend.isDemo, phase == .ready || phase == .unscanned else { return }
+        // A hundredth of a gigabyte: under any figure shown, so the disk's own flutter redraws nothing.
+        let step = 1e7
+        if abs(Double(free) - volume.free) >= step {
+            let now = backend.volume()
+            if abs(now.free - volume.free) >= step || now.capacity != volume.capacity { volume = now }
+        }
+        guard phase == .ready else { return }
+        let rest = max(0, used - measured)
+        if abs(rest - (bytes["system"] ?? 0)) >= step { bytes["system"] = rest }
     }
 
     /// Largest items of a category, for the storage page.
@@ -797,7 +818,9 @@ final class StorageModel {
     // MARK: Card model
 
     var meter: MeterModel {
-        let scale = shownTotal > capacity && shownTotal > 0 ? capacity / shownTotal : 1
+        // The folders can come to more than is used now, when a lot was deleted since they were measured.
+        let sum = bytes.values.reduce(0, +)
+        let scale = phase != .unscanned && sum > shownTotal && sum > 0 ? shownTotal / sum : 1
         var items: [MeterItem] = StorageCategoryInfo.all.map { info in
             let value = bytes[info.id] ?? 0
             return MeterItem(
