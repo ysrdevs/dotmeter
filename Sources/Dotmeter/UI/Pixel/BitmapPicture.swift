@@ -71,13 +71,11 @@ private enum SharedBitmaps {
 struct BitmapPen {
     let context: CGContext
 
-    private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-
-    /// An 8-bit sRGB bitmap of `size` points at `scale`, drawn in points from the top left.
+    /// An 8-bit bitmap of `size` points at `scale`, in the screen's own colours, drawn in points from the top left.
     static func render(size: CGSize, scale: CGFloat, _ draw: (BitmapPen) -> Void) -> CGImage? {
         let width = Int((size.width * scale).rounded(.up)), height = Int((size.height * scale).rounded(.up))
         guard width > 0, height > 0, width <= 16_384, height <= 16_384,
-              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: ScreenInk.space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
         else { return nil }
         context.translateBy(x: 0, y: CGFloat(height))
         context.scaleBy(x: scale, y: -scale)
@@ -86,7 +84,8 @@ struct BitmapPen {
     }
 
     private func setFill(_ rgb: RGB, _ alpha: Double) {
-        context.setFillColor(CGColor(srgbRed: rgb.r, green: rgb.g, blue: rgb.b, alpha: alpha))
+        let ink = ScreenInk.faithful(rgb, alpha)
+        context.setFillColor(CGColor(colorSpace: ScreenInk.space, components: [ink.r, ink.g, ink.b, alpha]) ?? CGColor(srgbRed: rgb.r, green: rgb.g, blue: rgb.b, alpha: alpha))
     }
 
     func fill(_ rects: [CGRect], _ rgb: RGB, _ alpha: Double = 1) {

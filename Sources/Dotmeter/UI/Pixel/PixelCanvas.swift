@@ -21,7 +21,8 @@ struct PixelCanvas {
         let px0 = max(0, Int(x.rounded(.down))), px1 = min(width, Int(right.rounded(.up)))
         let py0 = max(0, Int(y.rounded(.down))), py1 = min(height, Int(bottom.rounded(.up)))
         guard px1 > px0, py1 > py0 else { return }
-        let r = rgb.r * 255, g = rgb.g * 255, b = rgb.b * 255
+        let ink = ScreenInk.faithful(rgb, min(1, alpha))
+        let r = ink.r * 255, g = ink.g * 255, b = ink.b * 255
         let stride = width
         bytes.withUnsafeMutableBufferPointer { out in
             for py in py0..<py1 {
@@ -42,7 +43,8 @@ struct PixelCanvas {
     }
 
     func image() -> CGImage? {
-        guard width > 0, height > 0, let space = CGColorSpace(name: CGColorSpace.sRGB), let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+        let space = ScreenInk.space
+        guard width > 0, height > 0, let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
         return CGImage(
             width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
             space: space, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue), provider: provider,

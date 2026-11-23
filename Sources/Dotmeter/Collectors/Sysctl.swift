@@ -34,4 +34,9 @@ struct MachTime {
     func nanoseconds(_ absolute: UInt64) -> UInt64 {
         numer == denom ? absolute : absolute * numer / denom
     }
+
+    /// A length of time in the clock's own ticks.
+    func ticks(seconds: Double) -> UInt64 {
+        UInt64(seconds * 1e9) * denom / numer
+    }
 }

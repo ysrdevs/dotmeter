@@ -67,6 +67,17 @@ if arguments.contains("--bench") {
     DebugTools.bench()
     exit(0)
 }
+if arguments.contains("--bench-contents") {
+    MainActor.assumeIsolated {
+        _ = NSApplication.shared
+        DebugTools.benchContents()
+    }
+    exit(0)
+}
+if arguments.contains("--bench-processes") {
+    DebugTools.benchProcesses()
+    exit(0)
+}
 if arguments.contains("--bench-draw") {
     DebugTools.benchDraw()
     exit(0)

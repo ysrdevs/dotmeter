@@ -10,6 +10,10 @@ final class ProcessSampler {
     /// What a process is. It only changes when the process replaces itself with another program, which shows
     /// as a new short name, so the path, the name and the app it belongs to are worked out once and kept.
     private struct Identity {
+        /// When the process started and who started it. A pid is handed out again once its process is gone;
+        /// the start time tells the new one from the old without asking for its name again.
+        var start: UInt64 = 0
+        var ppid: pid_t = 0
         var comm: String
         var path: String?
         var name: String
@@ -20,6 +24,10 @@ final class ProcessSampler {
     }
 
     private var identities: [pid_t: Identity] = [:]
+    /// Processes this user may not read: other users' and most of the system's, a quarter of the list. They are
+    /// left alone, and asked again now and then in case the pid has since gone to a process that can be read.
+    private var refused: Set<pid_t> = []
+    private var pass = 0
     private var lastCPU: [pid_t: Double] = [:]
 
     /// Running totals the kernel keeps per process, and the rates worked out from them last time.
@@ -65,14 +73,24 @@ final class ProcessSampler {
         var owners: [Identity] = []
         owners.reserveCapacity(count)
 
+        pass &+= 1
+        let machNow = mach_absolute_time()
+        let young = MachTime.shared.ticks(seconds: 20)
         for i in 0..<count {
             let pid = pids[i]
             var cpuNanos: UInt64 = 0
             var footprint: UInt64 = 0
+            if refused.contains(pid), (Int(pid) &+ pass) % 16 != 0 { continue }
 
             var usage = dotmeter_proc_usage_t()
             var rates = Rates()
-            if dotmeter_proc_usage(pid, &usage) == 0 {
+            let answer = dotmeter_proc_usage(pid, &usage)
+            if answer == -2 {
+                refused.insert(pid)
+                continue
+            }
+            refused.remove(pid)
+            if answer == 0 {
                 cpuNanos = MachTime.shared.nanoseconds(usage.cpu_time)
                 footprint = usage.footprint
                 let counters = Counters(read: usage.disk_read, written: usage.disk_written, energy: usage.energy_nj)
@@ -103,17 +121,29 @@ final class ProcessSampler {
 
             var ppid: pid_t = 0
             var comm = ""
-            var bsd = proc_bsdshortinfo()
-            let bsdSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-            if proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &bsd, bsdSize) == bsdSize {
-                ppid = pid_t(bsd.pbsi_ppid)
-                comm = withUnsafePointer(to: &bsd.pbsi_comm) {
-                    $0.withMemoryRebound(to: CChar.self, capacity: 17) { String(cString: $0) }
+            // A process already known, and the same one by its start time, keeps its name and parent without
+            // being asked. It is asked again while it is young (a new process carries its parent's name until it
+            // becomes its own program) and every eighth pass after that, in case it was renamed or adopted.
+            let known = identities[pid]
+            let same = known.map { answer == 0 && usage.start != 0 && $0.start == usage.start } ?? false
+            let settled = same && machNow &- usage.start > young && (Int(pid) &+ pass) % 8 != 0
+            if settled, let known {
+                ppid = known.ppid
+                comm = known.comm
+            } else {
+                var bsd = proc_bsdshortinfo()
+                let bsdSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+                if proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &bsd, bsdSize) == bsdSize {
+                    ppid = pid_t(bsd.pbsi_ppid)
+                    comm = withUnsafePointer(to: &bsd.pbsi_comm) {
+                        $0.withMemoryRebound(to: CChar.self, capacity: 17) { String(cString: $0) }
+                    }
                 }
             }
 
             let identity: Identity
-            if let known = identities[pid], known.comm == comm {
+            if var known, known.comm == comm, same || usage.start == 0 {
+                if known.ppid != ppid { known.ppid = ppid; identities[pid] = known }
                 identity = known
             } else {
                 var path: String?
@@ -125,7 +155,7 @@ final class ProcessSampler {
                 else if let path { name = (path as NSString).lastPathComponent }
                 else { name = comm.isEmpty ? "pid \(pid)" : comm }
                 let bundle = path.flatMap(Self.bundlePath(for:))
-                identity = Identity(comm: comm, path: path, name: name, bundle: bundle, key: bundle ?? "proc:" + name)
+                identity = Identity(start: usage.start, ppid: ppid, comm: comm, path: path, name: name, bundle: bundle, key: bundle ?? "proc:" + name)
                 identities[pid] = identity
             }
             owners.append(identity)
@@ -141,6 +171,7 @@ final class ProcessSampler {
             lastCPU = Dictionary(uniqueKeysWithValues: processes.map { ($0.pid, $0.cpu) })
         }
         if identities.count > nextCPUTime.count * 2 { identities = identities.filter { nextCPUTime[$0.key] != nil } }
+        if refused.count > count { refused = refused.intersection(pids[0..<count]) }
 
         var namesByPid: [pid_t: String] = [:]
         for p in processes { namesByPid[p.pid] = p.name }

@@ -17,6 +17,12 @@ final class StatusController: NSObject, NSWindowDelegate {
     private var items: [AppSection: NSStatusItem] = [:]
     /// What each item last drew, so an unchanged reading does not redraw the menu bar.
     private var itemKeys: [AppSection: String] = [:]
+    private var faces: [AppSection: StatusFace] = [:]
+    /// Whether the items show their pictures through layers of their own, which costs about a third as much as
+    /// handing each picture to the button. Off unless asked for, until it has been looked at on a real menu bar:
+    /// DOTMETER_ITEM_DRAW=layer for one run, or `defaults write com.ysr.dotmeter menuBarLayers -bool true`.
+    private static let layerItems = ProcessInfo.processInfo.environment["DOTMETER_ITEM_DRAW"] == "layer"
+        || (ProcessInfo.processInfo.environment["DOTMETER_ITEM_DRAW"] == nil && UserDefaults.standard.bool(forKey: "menuBarLayers"))
     private let models: AppModels
     private let monitor: SystemMonitor
     private let analysis: AnalysisSession
@@ -48,6 +54,13 @@ final class StatusController: NSObject, NSWindowDelegate {
         MainMenu.install(target: self)
         syncItems()
         monitor.addObserver { [weak self] _ in self?.updateItems() }
+        // A screen added or taken away changes how the items are drawn: see `updateItems`.
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.itemKeys.removeAll()
+                self?.updateItems()
+            }
+        }
         trackSettings()
         trackRouter()
     }
@@ -89,6 +102,7 @@ final class StatusController: NSObject, NSWindowDelegate {
             if panel?.isVisible == true, anchor == section { closePanel() }
             if let item = items.removeValue(forKey: section) { NSStatusBar.system.removeStatusItem(item) }
             itemKeys[section] = nil
+            faces[section] = nil
         }
         // A new item appears to the left of the ones already there, so the right-most is made first.
         for section in wanted.reversed() where items[section] == nil {
@@ -121,6 +135,9 @@ final class StatusController: NSObject, NSWindowDelegate {
 
     private func updateItems() {
         let settings = AppSettings.shared
+        // Other screens show copies of each item that macOS makes by asking the button to draw, so with more than
+        // one screen the items are drawn the usual way.
+        let layered = Self.layerItems && NSScreen.screens.count == 1
         for (section, item) in items {
             guard let button = item.button else { continue }
             if section == .dashboard {
@@ -152,11 +169,50 @@ final class StatusController: NSObject, NSWindowDelegate {
                 continue
             }
             let content = MenuBarRenderer.content(for: section, snapshot: snapshot, history: monitor.latestHistory, storage: storage)
-            let key = MenuBarRenderer.key(content, style: style)
+            // A dark menu bar wants white ink and a light one black; a template picture is given that by macOS,
+            // a layer has to be told.
+            let dark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .vibrantDark, .aqua, .vibrantLight]).map { $0 == .darkAqua || $0 == .vibrantDark } ?? true
+            let key = MenuBarRenderer.key(content, style: style) + (layered ? (dark ? ";layer-dark" : ";layer-light") : "")
             guard itemKeys[section] != key else { continue }
             itemKeys[section] = key
-            button.image = MenuBarRenderer.image(content, style: style, id: section.rawValue)
-            button.toolTip = content.tooltip
+            if layered {
+                // The picture goes to a layer of the item's own. The button is never asked to draw, which is what
+                // made a changing item cost what it did: see `StatusFace`.
+                let plan = MenuBarRenderer.plan(content, style: style, id: section.rawValue, color: content.tint ?? (dark ? .white : .black))
+                guard let pixels = MenuBarRenderer.pixels(plan, scale: button.window?.backingScaleFactor ?? 2) else { continue }
+                let face = faces[section] ?? {
+                    let face = StatusFace(frame: button.bounds)
+                    face.autoresizingMask = [.width, .height]
+                    faces[section] = face
+                    button.addSubview(face)
+                    button.image = nil
+                    button.toolTip = nil
+                    // The tooltip is asked for when it is about to show, not written on every reading.
+                    button.addToolTip(NSRect(x: 0, y: 0, width: 4000, height: 200), owner: face, userData: nil)
+                    // A view is told its appearance as it joins a window, in the middle of this very loop, so the
+                    // redraw waits for the loop to be over.
+                    face.appearanceChanged = { [weak self] in
+                        DispatchQueue.main.async {
+                            self?.itemKeys[section] = nil
+                            self?.updateItems()
+                        }
+                    }
+                    return face
+                }()
+                // The picture's own width: macOS adds the same margin round it as it does round an image.
+                let length = plan.size.width
+                if item.length != length { item.length = length }
+                face.tip = content.tooltip
+                face.show(pixels, size: plan.size, template: content.tint == nil)
+            } else {
+                if let face = faces.removeValue(forKey: section) {
+                    face.removeFromSuperview()
+                    button.removeAllToolTips()
+                    item.length = NSStatusItem.variableLength
+                }
+                button.image = MenuBarRenderer.image(content, style: style, id: section.rawValue)
+                button.toolTip = content.tooltip
+            }
         }
     }
 
@@ -412,7 +468,11 @@ final class StatusController: NSObject, NSWindowDelegate {
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.isReleasedWhenClosed = false
-            window.isMovableByWindowBackground = true
+            // The window moves by its background. For that macOS works out, after every change to the page, which
+            // parts of it can be dragged: about half a percent of a core on the Dashboard. A drag can only start
+            // with the pointer over the window, so that is the only time it is switched on.
+            window.isMovableByWindowBackground = NSMouseInRect(NSEvent.mouseLocation, window.frame, false)
+            host.view.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: ["window": "main"]))
             window.contentMinSize = NSSize(width: MainView.sidebarWidth + PX.cardWidth + 48, height: 480)
             window.setContentSize(NSSize(width: MainView.sidebarWidth + PX.cardWidth * 2 + 20 + 64, height: 940))
             window.center()
@@ -454,6 +514,23 @@ final class StatusController: NSObject, NSWindowDelegate {
             closing.contentViewController = nil
             self.mainWindow = nil
         }
+    }
+
+    /// The pointer came over the main window, or left it: see `openMainWindow`.
+    @objc func mouseEntered(with event: NSEvent) {
+        guard event.trackingArea?.userInfo?["window"] as? String == "main" else { return }
+        mainWindow?.isMovableByWindowBackground = true
+    }
+
+    @objc func mouseExited(with event: NSEvent) {
+        guard event.trackingArea?.userInfo?["window"] as? String == "main", let window = mainWindow else { return }
+        // Not while a button is down: a drag that has started carries the pointer with the window.
+        if NSEvent.pressedMouseButtons == 0 { window.isMovableByWindowBackground = false }
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === mainWindow else { return }
+        if NSMouseInRect(NSEvent.mouseLocation, window.frame, false) { window.isMovableByWindowBackground = true }
     }
 
     func windowDidChangeOcclusionState(_ notification: Notification) {
@@ -616,6 +693,13 @@ final class StatusController: NSObject, NSWindowDelegate {
                     print("ITEM \(section.rawValue) visible=\(item.isVisible) x=\(Int(frame.minX)) width=\(Int(frame.width)) image=\(button.image.map { "\(Int($0.size.width))x\(Int($0.size.height)) template=\($0.isTemplate)" } ?? "none") tip=\(button.toolTip ?? "")")
                 }
             }
+            // DOTMETER_CAPTURE_ITEMS=folder: each item's own window as it stands, one picture an item.
+            if let folder = env["DOTMETER_CAPTURE_ITEMS"] {
+                for (section, item) in items {
+                    guard let view = item.button?.window?.contentView else { continue }
+                    Self.capture(view, to: folder + "/item-\(section.rawValue).png")
+                }
+            }
             // DOTMETER_CAPTURE_MENUBAR=path: every area's menu bar item in every style, on dark and light strips.
             if let path = env["DOTMETER_CAPTURE_MENUBAR"], let snapshot = monitor.snapshot {
                 MenuBarRenderer.writeSheet(to: path, snapshot: snapshot, history: monitor.history, storage: storage)
@@ -663,5 +747,64 @@ final class StatusController: NSObject, NSWindowDelegate {
             try? png.write(to: URL(fileURLWithPath: path))
             if !quiet { print("CAPTURE \(path) \(rep.pixelsWide)x\(rep.pixelsHigh)") }
         }
+    }
+}
+
+/// A menu bar item's picture shown by a layer of its own.
+///
+/// Giving a status item's button a new image makes AppKit draw the button, lay the item out again, and draw it a
+/// second time for the copies it keeps for other screens: about six milliseconds an item, every time a figure
+/// changes. A layer's contents go straight to the compositor and none of that happens. Five live items cost
+/// 1.1% of a core the first way and 0.4% this way, which is what the plain icon alone costs.
+final class StatusFace: NSView, NSViewToolTipOwner {
+    private let picture = CALayer()
+    var tip = ""
+    var appearanceChanged: (() -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.addSublayer(picture)
+        picture.contentsGravity = .resize
+        picture.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "opacity": NSNull()]
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Clicks belong to the button underneath.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String { tip }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        appearanceChanged?()
+    }
+
+    override func layout() {
+        super.layout()
+        place()
+    }
+
+    private var size = NSSize.zero
+
+    private func place() {
+        // Whole pixels, or the picture is resampled and its dots blur.
+        let scale = window?.backingScaleFactor ?? 2
+        func snap(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
+        picture.frame = NSRect(x: snap((bounds.width - size.width) / 2), y: snap((bounds.height - size.height) / 2), width: size.width, height: size.height)
+    }
+
+    /// A template picture is one macOS would ink itself. It does so at nine tenths strength, measured from a
+    /// button's own drawing; a picture in a warning colour is shown as it is.
+    func show(_ pixels: CGImage, size: NSSize, template: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        self.size = size
+        picture.opacity = template ? 0.9 : 1
+        picture.contentsScale = window?.backingScaleFactor ?? 2
+        place()
+        picture.contents = pixels
+        CATransaction.commit()
     }
 }

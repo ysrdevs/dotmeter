@@ -295,7 +295,31 @@ Side by side with the build before these four, on the same Mac at the same time 
 | Window open on USB | 2.00% | 1.25% |
 | Window open on the Timeline | 1.68% | 1.04% |
 
-One thing was tried and taken out again: the bars' twinkling cells are a tiny picture replaced ten times a second, and Core Animation re-renders each one into its own memory before showing it, which costs more than working the cells out. Giving it the window server's pixel order, or an untagged colour space, changed nothing; the copy belongs to replacing a layer's contents, not to the format.
+The bars' twinkling cells are a tiny picture replaced ten times a second, and Core Animation used to re-render each one into its own memory before showing it, which cost more than working the cells out. The pixel order makes no difference to that, and neither does an untagged colour space. The colour space the picture is tagged with does: see the next section.
+
+### A second round
+
+Measured with the old and the new build running side by side in the same state, because readings of one build taken an hour apart differ by more than these changes do:
+
+| State | Before | After |
+| --- | --- | --- |
+| Menu bar only, five live items | 1.17% · 29 MB | 1.19% · 30 MB |
+| The same, items shown by layers of their own (off by default, see below) | 1.16% | 0.35% |
+| A panel open | 3.03% · 54 MB | 2.81% · 56 MB |
+| Window on the Dashboard | 5.93% · 149 MB | 5.72% · 138 MB |
+| Window on Graphics | 3.23% · 82 MB | 2.94% · 72 MB |
+| Window on Thermals | 3.22% · 93 MB | 3.17% · 82 MB |
+| Window on Power | 3.11% · 102 MB | 2.86% · 93 MB |
+
+The other pages moved by less than the readings scatter. What changed:
+
+- **Pictures are made in the screen's own colour space** (`ScreenInk`). A picture handed to a layer in any other space is converted and copied by macOS on arrival, on this process's time: a bar's cells cost 30 µs to show in sRGB and 11 µs in the screen's space, a chart 917 µs against 315 µs (`Dotmeter --bench-contents`). It also means one copy of each picture in memory instead of two, which is where the ten megabytes went. macOS converts a see-through pixel after multiplying it by its alpha, so the colours are converted the same way here, and a picture comes out as it did before: exactly where a pixel is fully covered, within five levels of 255 on the antialiased edges of the dim dots, and only on a screen whose tone curve is not sRGB's. The bar's still render, which blends see-through fills inside one bitmap, stays in sRGB, and so do sprites that are made once.
+- **The process list asks less.** A quarter of the processes may not be read by an ordinary user, and each was asked three times a pass; the rest were asked twice. Unreadable ones are now left alone and tried again every sixteenth pass, and a process already known, the same one by its pid and start time, keeps its name and parent. The list is the same; the pass makes about a third of the system calls.
+- **The twinkle's noise is worked out per column**, not per cell: the same numbers to sixteen decimal places for an eighth of the arithmetic.
+- **Moving the window by its background** makes macOS work out, after every change to the page, which parts can be dragged: half a percent of a core on the Dashboard. It is switched on only while the pointer is over the window.
+- **Storage figures follow the disk without asking the volume on every tick**: only when the free space has moved by ten megabytes.
+
+**Menu bar items by layer.** Giving a status item's button a new image makes AppKit draw the button, lay the item out again and draw it once more for the copies it keeps for other screens: about six milliseconds an item, every time a figure changes. `StatusFace` shows the picture through a layer of its own instead, and five live items then cost what the plain icon costs. It is matched to the button's own drawing from captures of the item windows (`DOTMETER_CAPTURE_ITEMS=<folder>`): the same width, ink at nine tenths as macOS inks a template, no font smoothing. It is off unless asked for (`DOTMETER_ITEM_DRAW=layer` for one run, or `defaults write com.ysr.dotmeter menuBarLayers -bool true`), because the menu bar itself cannot be captured and it has not been looked at there. With more than one screen the items are drawn the usual way regardless, since the copies on other screens only follow a button that is asked to draw.
 
 Getting there took the bar through three renderers, and the reasons are worth keeping:
 

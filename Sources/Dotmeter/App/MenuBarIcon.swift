@@ -191,8 +191,7 @@ enum MenuBarRenderer {
 
     // MARK: Drawing
 
-    /// `color` draws in that color instead of as a template, for previews outside the menu bar.
-    static func image(_ content: Content, style: AppSettings.MenuBarItemStyle, id: String, color: NSColor? = nil) -> NSImage {
+    static func plan(_ content: Content, style: AppSettings.MenuBarItemStyle, id: String, color: NSColor? = nil) -> Plan {
         let font = content.lines.count > 1 ? stackedFont : singleFont
         let showsText = style != .compact && !content.lines.isEmpty
         // A charging battery carries a small bolt after it.
@@ -217,7 +216,7 @@ enum MenuBarRenderer {
         let size = NSSize(width: ceil(leading + gap + textWidth) + 1, height: height)
         let ink = color ?? content.tint ?? .black
 
-        let image = NSImage(size: size, flipped: false) { _ in
+        let paint: () -> Bool = {
             if style == .icon {
                 let configuration = NSImage.SymbolConfiguration(pointSize: 12.5, weight: .medium).applying(NSImage.SymbolConfiguration(paletteColors: [ink]))
                 if let symbol = NSImage(systemSymbolName: content.symbol, accessibilityDescription: nil)?.withSymbolConfiguration(configuration) {
@@ -254,8 +253,41 @@ enum MenuBarRenderer {
             }
             return true
         }
-        image.isTemplate = color == nil && content.tint == nil
+        return Plan(size: size, template: color == nil && content.tint == nil, paint: paint)
+    }
+
+    /// A picture worked out but not yet drawn: how big it is, whether macOS colors it, and how to draw it.
+    struct Plan {
+        var size: NSSize
+        var template: Bool
+        var paint: () -> Bool
+    }
+
+    /// `color` draws in that color instead of as a template, for previews outside the menu bar.
+    static func image(_ content: Content, style: AppSettings.MenuBarItemStyle, id: String, color: NSColor? = nil) -> NSImage {
+        let plan = plan(content, style: style, id: id, color: color)
+        let image = NSImage(size: plan.size, flipped: false) { _ in plan.paint() }
+        image.isTemplate = plan.template
         return image
+    }
+
+    /// The same picture drawn once, now, into pixels: showing it again costs a copy, not a drawing.
+    static func pixels(_ plan: Plan, scale: CGFloat) -> CGImage? {
+        let width = Int((plan.size.width * scale).rounded(.up)), height = Int((plan.size.height * scale).rounded(.up))
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: ScreenInk.space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.scaleBy(x: scale, y: scale)
+        // A bare bitmap thickens its text for a screen of coloured stripes; a view's own drawing has not done that
+        // for years, and the figures must look as they do when the button draws them.
+        context.setAllowsFontSmoothing(false)
+        context.setShouldSmoothFonts(false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        _ = plan.paint()
+        NSGraphicsContext.restoreGraphicsState()
+        return context.makeImage()
     }
 
     /// How many columns each port gets: two while all of them still fit in the glyph, else one.

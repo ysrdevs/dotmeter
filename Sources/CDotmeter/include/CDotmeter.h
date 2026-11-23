@@ -1,6 +1,7 @@
 #ifndef CDOTMETER_H
 #define CDOTMETER_H
 
+#include <errno.h>
 #include <libproc.h>
 #include <sys/resource.h>
 #include <sys/sysctl.h>
@@ -55,11 +56,16 @@ typedef struct {
     uint64_t disk_written;
     uint64_t energy_nj;
     int      has_energy;
+    // When the process started, in mach time: with the pid, this says which process it is.
+    uint64_t start;
 } dotmeter_proc_usage_t;
 
+// Returns 0 when read, -2 when the process may not be read by this user (another user's, or the system's),
+// and -1 for anything else. A refusal is final, so the older structure is not tried after one.
 static inline int dotmeter_proc_usage(int pid, dotmeter_proc_usage_t *out) {
     struct rusage_info_v6 six;
     if (proc_pid_rusage(pid, RUSAGE_INFO_V6, (rusage_info_t *)&six) == 0) {
+        out->start = six.ri_proc_start_abstime;
         out->cpu_time = six.ri_user_time + six.ri_system_time;
         out->footprint = six.ri_phys_footprint;
         out->disk_read = six.ri_diskio_bytesread;
@@ -68,8 +74,11 @@ static inline int dotmeter_proc_usage(int pid, dotmeter_proc_usage_t *out) {
         out->has_energy = 1;
         return 0;
     }
+    if (errno == EPERM) return -2;
+    if (errno == ESRCH) return -1;
     struct rusage_info_v4 four;
     if (proc_pid_rusage(pid, RUSAGE_INFO_V4, (rusage_info_t *)&four) == 0) {
+        out->start = four.ri_proc_start_abstime;
         out->cpu_time = four.ri_user_time + four.ri_system_time;
         out->footprint = four.ri_phys_footprint;
         out->disk_read = four.ri_diskio_bytesread;
@@ -78,7 +87,7 @@ static inline int dotmeter_proc_usage(int pid, dotmeter_proc_usage_t *out) {
         out->has_energy = 0;
         return 0;
     }
-    return -1;
+    return errno == EPERM ? -2 : -1;
 }
 
 // APFS lets several files share the same blocks (clones). `private_size` is what deleting this one file would free;

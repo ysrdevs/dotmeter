@@ -53,6 +53,8 @@ final class StorageModel {
     @ObservationIgnored private let symbols: [String: String]
     /// False for a model made to be tested: it neither reads the saved scan nor saves one.
     @ObservationIgnored private let remembers: Bool
+    /// The free space last handed to `follow`, when the volume was last asked.
+    @ObservationIgnored private var followed = -1.0
 
     private static let cacheKey = "storageScan.v2"
 
@@ -152,8 +154,11 @@ final class StorageModel {
     func follow(free: UInt64) {
         guard !backend.isDemo, phase == .ready || phase == .unscanned else { return }
         // A hundredth of a gigabyte: under any figure shown, so the disk's own flutter redraws nothing.
+        // The reading handed in and the volume's own figure can sit a little apart for good, so the volume is
+        // asked again only when the reading itself has moved: asking takes a couple of milliseconds.
         let step = 1e7
-        if abs(Double(free) - volume.free) >= step {
+        if abs(Double(free) - followed) >= step {
+            followed = Double(free)
             let now = backend.volume()
             if abs(now.free - volume.free) >= step || now.capacity != volume.capacity { volume = now }
         }

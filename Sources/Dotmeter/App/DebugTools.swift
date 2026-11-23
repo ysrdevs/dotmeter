@@ -934,6 +934,16 @@ enum DebugTools {
         }
     }
 
+    /// `Dotmeter --bench-processes`: the process pass alone, many times over, for a profiler to look at.
+    static func benchProcesses() {
+        let processes = ProcessSampler()
+        _ = processes.sample()
+        let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+        var seen = 0
+        for _ in 0..<400 { seen = processes.sample().processes.count }
+        print(String(format: "%d processes, %.2f ms on a core a pass", seen, Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 400 / 1e6))
+    }
+
     /// `Dotmeter --analyze`: run one analysis headlessly and stream the answer to stdout, from whichever provider
     /// is chosen (DOTMETER_PROVIDER=openai chooses for one run). DOTMETER_API_KEY or DOTMETER_OPENAI_API_KEY stands in
     /// for the Keychain.
@@ -1229,4 +1239,113 @@ private final class MadeUpDisk: StorageBackend, @unchecked Sendable {
     }
     func clear(_ id: String, children: [StorageChild], update: @escaping @Sendable (_ path: String, _ freed: Double) -> Void) async -> Double { 0 }
     func remove(_ item: StorageChild, permanently: Bool, progress: @escaping @Sendable (Double) -> Void) async -> RemovalFailure? { nil }
+}
+
+import IOSurface
+
+extension DebugTools {
+    /// `Dotmeter --bench-contents`: what it costs this process to hand a new picture to a layer, by pixel format.
+    /// A small window is shown for a few seconds so the layers really are committed to the screen.
+    @MainActor
+    static func benchContents() {
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 420, height: 160), styleMask: [.borderless], backing: .buffered, defer: false)
+        let view = NSView(frame: window.contentLayoutRect)
+        view.wantsLayer = true
+        window.contentView = view
+        window.orderFrontRegardless()
+        let layers: [CALayer] = (0..<8).map { index in
+            let layer = CALayer()
+            layer.frame = CGRect(x: 10 + (index % 4) * 100, y: 10 + (index / 4) * 70, width: 90, height: 60)
+            layer.magnificationFilter = .nearest
+            view.layer?.addSublayer(layer)
+            return layer
+        }
+        CATransaction.flush()
+        let screenSpace = window.screen?.colorSpace?.cgColorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        print("screen colour space: \(screenSpace.name.map { $0 as String } ?? "a profile of its own") · model \(screenSpace.model.rawValue)")
+        let rgba = CGImageAlphaInfo.premultipliedLast.rawValue
+        let bgra = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        func threadTime() -> UInt64 { clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) }
+
+        func run(_ name: String, width: Int, height: Int, make: (Int, Int) -> Any?) {
+            // Warm up, then time 400 rounds of eight new pictures and the commit that carries them.
+            var total: UInt64 = 0
+            for round in 0..<440 {
+                let start = threadTime()
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                for (index, layer) in layers.enumerated() { layer.contents = make(round, index) }
+                CATransaction.commit()
+                CATransaction.flush()
+                if round >= 40 { total += threadTime() - start }
+            }
+            print(String(format: "%-46@ %3dx%-3d  %6.1f µs a picture", name as NSString, width, height, Double(total) / 400 / 8 / 1000))
+        }
+        func image(_ width: Int, _ height: Int, _ space: CGColorSpace, _ info: UInt32, seed: Int) -> CGImage? {
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            for i in stride(from: 0, to: bytes.count, by: 4) {
+                let v = UInt8(truncatingIfNeeded: (i &* 31 &+ seed &* 7) >> 3)
+                bytes[i] = v; bytes[i + 1] = v; bytes[i + 2] = v; bytes[i + 3] = 255
+            }
+            guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+            return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4, space: space, bitmapInfo: CGBitmapInfo(rawValue: info), provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+        }
+        let srgb = CGColorSpace(name: CGColorSpace.sRGB)!, p3 = CGColorSpace(name: CGColorSpace.displayP3)!
+        for (width, height) in [(160, 22), (1200, 240)] {
+            run("sRGB, RGBA (as now)", width: width, height: height) { round, index in image(width, height, srgb, rgba, seed: round * 8 + index) }
+            run("sRGB, BGRA", width: width, height: height) { round, index in image(width, height, srgb, bgra, seed: round * 8 + index) }
+            run("the screen's own space, RGBA", width: width, height: height) { round, index in image(width, height, screenSpace, rgba, seed: round * 8 + index) }
+            run("the screen's own space, BGRA", width: width, height: height) { round, index in image(width, height, screenSpace, bgra, seed: round * 8 + index) }
+            run("Display P3, BGRA", width: width, height: height) { round, index in image(width, height, p3, bgra, seed: round * 8 + index) }
+            // A surface each layer keeps: the bytes are written in place and the layer is told they changed.
+            let surfaces: [IOSurface] = layers.map { _ in
+                IOSurface(properties: [.width: width, .height: height, .bytesPerElement: 4, .pixelFormat: 0x42475241 as UInt32])!
+            }
+            for (index, layer) in layers.enumerated() { layer.contents = surfaces[index] }
+            CATransaction.flush()
+            let changed = Selector(("setContentsChanged"))
+            print("layers answer to setContentsChanged: \(layers[0].responds(to: changed))")
+            var total: UInt64 = 0
+            for round in 0..<440 {
+                let start = threadTime()
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                for (index, layer) in layers.enumerated() {
+                    let surface = surfaces[index]
+                    surface.lock(options: [], seed: nil)
+                    let base = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
+                    let row = surface.bytesPerRow
+                    for y in 0..<height {
+                        for x in stride(from: 0, to: width * 4, by: 4) {
+                            let v = UInt8(truncatingIfNeeded: ((y * width * 4 + x) &* 31 &+ (round * 8 + index) &* 7) >> 3)
+                            base[y * row + x] = v; base[y * row + x + 1] = v; base[y * row + x + 2] = v; base[y * row + x + 3] = 255
+                        }
+                    }
+                    surface.unlock(options: [], seed: nil)
+                    if layer.responds(to: changed) { layer.perform(changed) }
+                }
+                CATransaction.commit()
+                CATransaction.flush()
+                if round >= 40 { total += threadTime() - start }
+            }
+            print(String(format: "%-46@ %3dx%-3d  %6.1f µs a picture", "a surface written in place" as NSString, width, height, Double(total) / 400 / 8 / 1000))
+            // What filling the bytes alone costs, so the rows above can be read net of it.
+            var fill: UInt64 = 0
+            for round in 0..<400 {
+                let start = threadTime()
+                for index in 0..<8 { _ = image(width, height, srgb, rgba, seed: round * 8 + index) }
+                fill += threadTime() - start
+            }
+            print(String(format: "%-46@ %3dx%-3d  %6.1f µs a picture", "(making the picture alone, no layer)" as NSString, width, height, Double(fill) / 400 / 8 / 1000))
+            // The other way round: leave the pictures in sRGB and make the window an sRGB one.
+            let before = window.colorSpace
+            window.colorSpace = .sRGB
+            CATransaction.flush()
+            run("sRGB picture in a window set to sRGB", width: width, height: height) { round, index in image(width, height, srgb, rgba, seed: round * 8 + index) }
+            run("screen-space picture in a window set to sRGB", width: width, height: height) { round, index in image(width, height, screenSpace, rgba, seed: round * 8 + index) }
+            window.colorSpace = before
+            CATransaction.flush()
+        }
+        window.orderOut(nil)
+    }
 }

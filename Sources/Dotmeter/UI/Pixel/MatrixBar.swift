@@ -306,6 +306,24 @@ final class MatrixEngine {
         return nil
     }
 
+    /// Where each cell starts in its twinkle and how fast it goes round. These never change for a cell, so they
+    /// are worked out once for a bar of a given size.
+    private var twinkleCache: (cols: Int, rows: Int, phase: [Double], pace: [Double]) = (0, 0, [], [])
+
+    private func cellHashes(cols: Int, rows: Int) -> (phase: [Double], pace: [Double]) {
+        if twinkleCache.cols != cols || twinkleCache.rows != rows {
+            var phase = [Double](repeating: 0, count: cols * rows), pace = phase
+            for r in 0..<rows {
+                for c in 0..<cols {
+                    phase[r * cols + c] = Self.hash(Int32(c), Int32(r), 17)
+                    pace[r * cols + c] = Self.hash(Int32(c), Int32(r), 91)
+                }
+            }
+            twinkleCache = (cols, rows, phase, pace)
+        }
+        return (twinkleCache.phase, twinkleCache.pace)
+    }
+
     /// Visits every lit cell with its color. Shared by the live bitmap and the still renderer.
     func forEachLitCell(bar: CGRect, rows: Int, time: Double, _ body: (_ col: Int, _ row: Int, _ rgb: RGB, _ alpha: Double) -> Void) {
         let l = layout(bar: bar, rows: rows)
@@ -320,6 +338,25 @@ final class MatrixEngine {
         let heatWidth = 54.0
         let topSpan = Double(rows) * 0.34, bottomSpan = Double(rows) * 0.30
 
+        // The drifting noise is smooth between points 12 columns and 7.5 rows apart, so it is not worked out from
+        // scratch for every cell: the points either side of a column are found once and blended down it. The same
+        // numbers as `noise` gives, for an eighth of the work.
+        let twinkle = cellHashes(cols: l.cols, rows: rows)
+        var rowPoint = [Int](repeating: 0, count: rows), rowBlend = [Double](repeating: 0, count: rows)
+        for r in 0..<rows {
+            let y = Double(r) / 7.5, yf = floor(y), t = y - yf
+            rowPoint[r] = Int(yf)
+            rowBlend[r] = t * t * (3 - 2 * t)
+        }
+        let points = (rowPoint.last ?? 0) + 2
+        var left = [Double](repeating: 0, count: points), right = left, column = left
+        var pointsSegment = -1, pointsX = Int.min
+        func point(_ xi: Int, _ yi: Int, _ zi: Int32, _ tz: Double) -> Double {
+            let x = Int32(truncatingIfNeeded: xi), y = Int32(truncatingIfNeeded: yi)
+            let near = Self.hash(x, y, zi)
+            return near + (Self.hash(x, y, zi &+ 1) - near) * tz
+        }
+
         var segIndex = 0
         for c in 0..<l.cols {
             let cx = l.gx + (Double(c) + 0.5) * p
@@ -328,6 +365,23 @@ final class MatrixEngine {
             if l.xs[segIndex + 1] - l.xs[segIndex] <= 0.4 { continue }
             let s = segs[segIndex]
             let field = f[segIndex]
+
+            let nx = Double(c) / 12 + s.seed, nxf = floor(nx), xi = Int(nxf)
+            if segIndex != pointsSegment || xi != pointsX {
+                let nz = slow * 2.2 + s.seed, nzf = floor(nz), zi = Int32(truncatingIfNeeded: Int(nzf))
+                var tz = nz - nzf
+                tz = tz * tz * (3 - 2 * tz)
+                let stepped = segIndex == pointsSegment && xi == pointsX + 1
+                for k in 0..<points {
+                    left[k] = stepped ? right[k] : point(xi, k, zi, tz)
+                    right[k] = point(xi + 1, k, zi, tz)
+                }
+                pointsSegment = segIndex
+                pointsX = xi
+            }
+            var tx = nx - nxf
+            tx = tx * tx * (3 - 2 * tx)
+            for k in 0..<points { column[k] = left[k] + (right[k] - left[k]) * tx }
 
             var h = 0.0
             if edgeHeat > 0.01 {
@@ -352,8 +406,10 @@ final class MatrixEngine {
                     lit = c % 2 == 1
                 } else if (c + r) % 2 == 0 {
                     // Every cell cycles through its own threshold at its own pace: that is the twinkle.
-                    let u = (Self.hash(ci, ri, 17) + tq * (0.045 + 0.13 * Self.hash(ci, ri, 91))).truncatingRemainder(dividingBy: 1)
-                    let low = Self.noise(Double(c) / 12 + s.seed, Double(r) / 7.5, slow * 2.2 + s.seed)
+                    let cell = r * l.cols + c
+                    let u = (twinkle.phase[cell] + tq * (0.045 + 0.13 * twinkle.pace[cell])).truncatingRemainder(dividingBy: 1)
+                    let yi = rowPoint[r]
+                    let low = column[yi] + (column[yi + 1] - column[yi]) * rowBlend[r]
                     var d = field.level
                         + field.top * max(0, 1 - Double(r) / topSpan)
                         + field.bottom * max(0, (Double(r) - (Double(rows) - bottomSpan)) / bottomSpan)
@@ -384,11 +440,14 @@ final class MatrixEngine {
         let count = cols * rows * 4
         if buffer.count != count { buffer = [UInt8](repeating: 0, count: count) } else { buffer.withUnsafeMutableBytes { $0.initializeMemory(as: UInt8.self, repeating: 0) } }
         buffer.withUnsafeMutableBufferPointer { pointer in
+            // Runs of cells share a colour, so the last one converted is kept at hand.
+            var last = RGB(r: -1, g: -1, b: -1), lastAlpha = -1.0, ink = last
             forEachLitCell(bar: bar, rows: rows, time: time) { c, r, rgb, alpha in
+                if rgb != last || alpha != lastAlpha { last = rgb; lastAlpha = alpha; ink = ScreenInk.faithful(rgb, alpha) }
                 let i = (r * cols + c) * 4
-                pointer[i] = UInt8(min(255, rgb.r * alpha * 255))
-                pointer[i + 1] = UInt8(min(255, rgb.g * alpha * 255))
-                pointer[i + 2] = UInt8(min(255, rgb.b * alpha * 255))
+                pointer[i] = UInt8(min(255, ink.r * alpha * 255))
+                pointer[i + 1] = UInt8(min(255, ink.g * alpha * 255))
+                pointer[i + 2] = UInt8(min(255, ink.b * alpha * 255))
                 pointer[i + 3] = UInt8(min(255, alpha * 255))
             }
         }
@@ -641,9 +700,10 @@ final class MatrixEngine {
             if l.xs[segIndex + 1] - l.xs[segIndex] <= 0.4 { continue }
             let s = segs[segIndex]
             let alpha = Self.lerp3(s.emphasis, 0.16, 0.36, 0.46)
-            buffer[c * 4] = UInt8(min(255, s.rgb.r * alpha * 255 + 0.5))
-            buffer[c * 4 + 1] = UInt8(min(255, s.rgb.g * alpha * 255 + 0.5))
-            buffer[c * 4 + 2] = UInt8(min(255, s.rgb.b * alpha * 255 + 0.5))
+            let ink = ScreenInk.faithful(s.rgb, alpha)
+            buffer[c * 4] = UInt8(min(255, ink.r * alpha * 255 + 0.5))
+            buffer[c * 4 + 1] = UInt8(min(255, ink.g * alpha * 255 + 0.5))
+            buffer[c * 4 + 2] = UInt8(min(255, ink.b * alpha * 255 + 0.5))
             buffer[c * 4 + 3] = UInt8(min(255, alpha * 255 + 0.5))
         }
     }
@@ -677,7 +737,8 @@ final class MatrixEngine {
                 let px0 = max(0, Int(left.rounded(.down))), px1 = min(w, Int(right.rounded(.up)))
                 let py0 = max(0, Int(top.rounded(.down))), py1 = min(h, Int(bottom.rounded(.up)))
                 guard px1 > px0, py1 > py0 else { continue }
-                let r = particle.rgb.r * 255, g = particle.rgb.g * 255, b = particle.rgb.b * 255
+                let ink = ScreenInk.convert(particle.rgb)
+                let r = ink.r * 255, g = ink.g * 255, b = ink.b * 255
                 for py in py0..<py1 {
                     let cy = min(bottom, Double(py + 1)) - max(top, Double(py))
                     guard cy > 0 else { continue }
@@ -699,7 +760,8 @@ final class MatrixEngine {
 
     // MARK: Sprites for the layer renderer
 
-    /// Draws into a fresh 8-bit sRGB bitmap using top-left point coordinates.
+    /// Draws into a fresh 8-bit sRGB bitmap using top-left point coordinates. Sprites are made once and kept, so
+    /// they are left in sRGB: there is no repeated conversion to save.
     fileprivate static func bitmap(width: Int, height: Int, scale: CGFloat, _ draw: (CGContext) -> Void) -> CGImage? {
         guard width > 0, height > 0, let space = CGColorSpace(name: CGColorSpace.sRGB),
               let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
@@ -1124,7 +1186,7 @@ final class MatrixLiveLayers {
         clearHaloKey = ""
     }
 
-    private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    private static var colorSpace: CGColorSpace { ScreenInk.space }
 
     /// Wraps an RGBA8 premultiplied buffer, first row at the top.
     private static func image(_ buffer: [UInt8], width: Int, height: Int) -> CGImage? {
@@ -1169,7 +1231,11 @@ final class MatrixLayerView: NSView {
     private let live = MatrixLiveLayers()
     private var isLive = false
 
+    /// Pictures drawn whole by CoreGraphics (the still render, and the base in DOTMETER_BAR=cg) stay in sRGB: their
+    /// translucent fills are blended inside the bitmap, and blending in another space changes how bright they come out.
     private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    /// The cells and their mask blend nothing: one colour a cell, and a shape. They are made in the screen's own space.
+    private static var cellSpace: CGColorSpace { ScreenInk.space }
     private static let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
     /// Debug: DOTMETER_BAR=cg draws the base with CoreGraphics instead of compositing it from layers (how a resting
     /// bar used to work), to compare the two pictures.
@@ -1320,7 +1386,7 @@ final class MatrixLayerView: NSView {
             shownCells = cellBuffer
             cellLayer.contents = CGImage(
                 width: l.cols, height: rows, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: l.cols * 4,
-                space: Self.colorSpace, bitmapInfo: CGBitmapInfo(rawValue: Self.bitmapInfo), provider: provider,
+                space: Self.cellSpace, bitmapInfo: CGBitmapInfo(rawValue: Self.bitmapInfo), provider: provider,
                 decode: nil, shouldInterpolate: false, intent: .defaultIntent
             )
         }
@@ -1330,7 +1396,7 @@ final class MatrixLayerView: NSView {
         if key != maskKey {
             maskKey = key
             let w = Int((gridWidth * scale).rounded(.up)), h = Int((gridHeight * scale).rounded(.up))
-            if let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: Self.colorSpace, bitmapInfo: Self.bitmapInfo) {
+            if let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: Self.cellSpace, bitmapInfo: Self.bitmapInfo) {
                 ctx.translateBy(x: 0, y: CGFloat(h))
                 ctx.scaleBy(x: scale, y: -scale)
                 let track = bar.offsetBy(dx: -CGFloat(l.gx), dy: -CGFloat(l.gy))
