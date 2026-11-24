@@ -19,10 +19,15 @@ final class StatusController: NSObject, NSWindowDelegate {
     private var itemKeys: [AppSection: String] = [:]
     private var faces: [AppSection: StatusFace] = [:]
     /// Whether the items show their pictures through layers of their own, which costs about a third as much as
-    /// handing each picture to the button. Off unless asked for, until it has been looked at on a real menu bar:
-    /// DOTMETER_ITEM_DRAW=layer for one run, or `defaults write com.ysr.dotmeter menuBarLayers -bool true`.
-    private static let layerItems = ProcessInfo.processInfo.environment["DOTMETER_ITEM_DRAW"] == "layer"
-        || (ProcessInfo.processInfo.environment["DOTMETER_ITEM_DRAW"] == nil && UserDefaults.standard.bool(forKey: "menuBarLayers"))
+    /// handing each picture to the button. The way back, should a Mac draw them wrong: DOTMETER_ITEM_DRAW=button
+    /// for one run, or `defaults write com.ysr.dotmeter menuBarLayers -bool false`.
+    private static let layerItems: Bool = {
+        switch ProcessInfo.processInfo.environment["DOTMETER_ITEM_DRAW"] {
+        case "layer": return true
+        case "button": return false
+        default: return UserDefaults.standard.object(forKey: "menuBarLayers") as? Bool ?? true
+        }
+    }()
     private let models: AppModels
     private let monitor: SystemMonitor
     private let analysis: AnalysisSession
