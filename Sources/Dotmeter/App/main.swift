@@ -28,6 +28,25 @@ if arguments.contains("--external-ip-test") {
     }
     dispatchMain()
 }
+if arguments.contains("--update-check") {
+    // What GitHub says the newest version is, and whether this copy would offer it. Asks; installs nothing.
+    Task { @MainActor in
+        do {
+            if let release = try await UpdateFeed.latest() {
+                let newer = AppVersion(release.version).map { $0 > AppVersion.running } ?? false
+                print("newest \(release.version) · this copy \(AppVersion.running) · \(newer ? "would be offered" : "nothing to offer")")
+                print("image \(release.image.absoluteString) · \(release.size ?? 0) bytes")
+                print("notes:\n\(release.notes)")
+            } else {
+                print("nothing has been published")
+            }
+        } catch {
+            print("failed: \(error.localizedDescription)")
+        }
+        exit(0)
+    }
+    dispatchMain()
+}
 if arguments.contains("--helper-off") {
     Task { @MainActor in
         await DebugTools.helperOff()

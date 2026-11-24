@@ -80,6 +80,8 @@ final class AppSettings {
     var latencyEnabled: Bool { didSet { defaults.set(latencyEnabled, forKey: "latencyEnabled") } }
     /// Ask an outside server for this Mac's public address while the Network panel or area is open.
     var publicAddressEnabled: Bool { didSet { defaults.set(publicAddressEnabled, forKey: "publicAddressEnabled") } }
+    /// Ask GitHub once a day whether a newer version is out.
+    var updateChecks: Bool { didSet { defaults.set(updateChecks, forKey: "updateChecks") } }
     /// What a kilowatt-hour costs, in dollars. Zero hides the cost.
     var energyPrice: Double { didSet { if !temporaryPrice { defaults.set(energyPrice, forKey: "energyPrice") } } }
     /// The period the Power area totals energy and cost over.
@@ -113,6 +115,7 @@ final class AppSettings {
         batteryAlertPercent = defaults.object(forKey: "batteryAlertPercent") as? Double ?? 20
         latencyEnabled = defaults.object(forKey: "latencyEnabled") as? Bool ?? true
         publicAddressEnabled = defaults.object(forKey: "publicAddressEnabled") as? Bool ?? true
+        updateChecks = defaults.object(forKey: "updateChecks") as? Bool ?? true
         energyPrice = ProcessInfo.processInfo.environment["DOTMETER_ENERGY_PRICE"].flatMap(Double.init) ?? defaults.double(forKey: "energyPrice")
         energyPeriod = EnergyPeriod(rawValue: ProcessInfo.processInfo.environment["DOTMETER_ENERGY_PERIOD"] ?? defaults.string(forKey: "energyPeriod") ?? "") ?? .month
 

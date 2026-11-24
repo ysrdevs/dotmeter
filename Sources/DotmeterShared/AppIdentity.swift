@@ -12,6 +12,8 @@ public enum AppIdentity {
     public static let helperID = bundleID + ".helper"
     /// The team whose signature the app and the helper each demand of the other.
     public static let team = "9RCV543M32"
+    /// Where new versions are published: the GitHub repository whose latest release the app asks about.
+    public static let repository = "ysrdevs/dotmeter"
     /// The folder under Application Support that holds the timeline and the followed cables.
     public static let supportFolder = "Dotmeter"
 

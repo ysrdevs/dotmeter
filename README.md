@@ -122,6 +122,8 @@ Ask what is going on with your Mac and get an answer based on a snapshot of the 
 
 Download the latest `Dotmeter-<version>.dmg` from the [Releases page](https://github.com/ysrdevs/dotmeter/releases/latest), open it and drag Dotmeter onto Applications. The app is signed and notarized by Apple.
 
+After that Dotmeter looks for a new version once a day and tells you when there is one. It installs it when you press Install, and only if the download is signed by the developer and notarized by Apple.
+
 <p align="center">
   <img src="docs/dmg-window-preview.png" width="420" alt="The install window">
 </p>
@@ -156,6 +158,7 @@ Dotmeter reads your Mac locally. It only uses the network for these, and each ca
 - **Latency echoes** go to your router and to `1.1.1.1` while the Network area is open.
 - **External IP** is asked of `1.1.1.1` when the Network area or panel opens.
 - **Speed test** uses Apple's `networkQuality`, only when you press the button.
+- **Update check** asks `api.github.com` once a day which version is the newest. A new version is downloaded from GitHub only when you press Install.
 
 There are no accounts, analytics or tracking.
 

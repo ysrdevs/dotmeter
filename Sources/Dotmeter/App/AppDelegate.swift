@@ -51,6 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if Migration.carryOverKeys() { await MainActor.run { AppSettings.shared.refreshKeys() } }
         }
 
+        // A copy opened for a capture or a measurement does not ask about updates, unless it was given a feed to ask.
+        if !autoOpen || UpdateFeed.override != nil { models.updates.start() }
+
         if autoOpen {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1.5))

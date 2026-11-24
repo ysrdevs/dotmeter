@@ -129,6 +129,25 @@ Notes:
 - The window layout is written directly by `Scripts/make-dmg-layout.swift` instead of by scripting Finder, which needs Automation permission and a visible window. It writes the same seven records, in the same file layout, as layout files in other install images. `Scripts/make-dmg-background.swift` draws the background; with `--preview <app>` it also renders the window in light and dark appearance (`docs/dmg-window-preview.png`). Finder draws icon labels black or white to suit the appearance, not the background, which is why the icons sit on a mid grey tray.
 - The Intel half is built and runs under Rosetta. It has never been run on an Intel Mac, where the sensor names differ.
 
+## Updates
+
+Once a day the app asks GitHub for the newest release of `ysrdevs/dotmeter` (`UpdateFeed`, one request to `api.github.com/repos/…/releases/latest`, nothing about the Mac in it). The first look is twenty seconds after launch, a failed one is tried again within the hour, and the switch is in Settings under Updates. A newer version brings up a window with what is new (`UpdateView`); found by the daily look, the window comes forward without taking the keyboard. Later closes it until the next day's look, Skip this version silences the daily look for that version only, and the menus, Settings and a line at the foot of the sidebar all lead back to it.
+
+Nothing is downloaded until Install is pressed. Then (`UpdateInstaller.prepare`):
+
+1. The release's `.dmg` is downloaded to a temporary folder. Its size has to be the size GitHub gave.
+2. The image is mounted read-only, out of sight, and the app inside is checked by macOS against one requirement: it is Dotmeter (the identifier), signed with the developer's Developer ID (the team), and notarized by Apple. Every architecture and the helper inside are checked. Its version has to be newer than the one running, so an old release cannot be put back.
+3. It is copied beside the installed app, on the same volume, and the copy is checked again: what was checked is what gets installed.
+4. The copy and the app change places in one step (`renamex_np` with `RENAME_SWAP`; two renames where the disk cannot swap), the old copy is removed, and a small shell waits for this process to go and opens the new one with the same arguments and `DOTMETER_` switches.
+
+Where the app may not change its own folder, or macOS is running it from a temporary place, steps 3 and 4 give way to a button that opens the checked image for dragging by hand.
+
+Where a download came from is never the reason to trust it. A feed pointed elsewhere (`DOTMETER_UPDATE_FEED`) can only offer what passes the same check, which is what makes the switch safe to ship and the whole way testable: `--self-test update` with `DOTMETER_UPDATE_TEST_IMAGE=dist/Dotmeter-<version>.dmg` runs a real install on a copy of the app in a temporary folder and then changes one bit of the program, the Info.plist and the helper in turn to see each refused.
+
+The notes shown are the release's text up to its `## Install` heading, so keep what is new above that heading when writing a release.
+
+Not tried: an update of a copy whose uninstall helper is switched on (the helper's approval should carry over, since the team is the same), and a development-signed copy replacing itself with the released one, which makes the Keychain ask once about each saved key as any change of signature does. The first release with this in it still has to be installed by hand.
+
 ## Storage: what it reads and what it deletes
 
 The first scan asks macOS for permission to look in Documents, Desktop and Downloads. It reads file sizes only, never contents. The Photos library and the Trash are private to macOS; without Full Disk Access they are counted under System data, and the card says so and offers to open the right Settings pane.
@@ -372,6 +391,8 @@ $BIN --ports                     # every app listening for connections, as the N
 $BIN --watch-test                # arm the plug watcher for 15 s and print each change the registry reports
 $BIN --watch-test IOMedia 20     # the same for another class: mount a disk image meanwhile to see it fire
 $BIN --external-ip-test          # one real lookup of the external address; prints its kind, not the address
+$BIN --update-check              # asks GitHub for the newest version and says whether this copy would offer it
+$BIN --self-test update          # versions, GitHub's answer, the signature check; with DOTMETER_UPDATE_TEST_IMAGE, a real install on a scratch copy
 $BIN --bench-draw                # wall and CPU time per bar redraw, per pixel format
 $BIN --scan-test /Applications   # time the disk walker on one folder
 open -n -W build/Dotmeter.app --args --scan-report /tmp/report.txt   # full real scan, totals written to a file
@@ -394,6 +415,10 @@ $BIN --render-card out.png scan  # the storage card alone at 2x: rest | scan | c
 | `DOTMETER_POWER_DEMO=laptop\|charging\|low\|full` | Reports a made-up MacBook in that state, which also turns on the Battery area, its menu bar item, and (with the timeline demo) a week of charge history. |
 | `DOTMETER_ENERGY_PRICE=0.16`, `DOTMETER_ENERGY_PERIOD=today\|week\|month\|year\|all` | A price per kWh and a period for one run, without saving either. With the timeline demo there are five months of made-up days behind them. |
 | `DOTMETER_SETTINGS_SCROLL=alerts` | With `DOTMETER_CAPTURE_SETTINGS`: open the form at the notifications section. |
+| `DOTMETER_UPDATE_DEMO=available` | A made-up release in that state (`available`, `downloading`, `verifying`, `restarting`, `failed`, `byhand`, `current`, `checking`, `unreachable`). Nothing is asked or installed. |
+| `DOTMETER_CAPTURE_UPDATE=path` | Write the update window as it stands. |
+| `DOTMETER_UPDATE_FEED=<url or path>` | Read the newest release from there instead of GitHub; its image may be a file or a server on this Mac. Nothing is saved from such a run. |
+| `DOTMETER_UPDATE_AUTO=1` | With `DOTMETER_UPDATE_FEED`: press Install as soon as a newer version is found. |
 | `DOTMETER_SPEED_DEMO=1`, `DOTMETER_DEBUG_SPEED=1`, `DOTMETER_SPEED_DEMO_HOLD=1` | Play a made-up speed test without touching the network; start a test on launch; keep it in its running state. |
 | `DOTMETER_DEBUG_EXPLAIN=1` | Press Explain on whatever page or panel is shown (with `DOTMETER_MOCK_ANALYSIS=1`, a canned answer). |
 | `DOTMETER_SCROLL=<points>` | Shift every page up by that much, to capture what is below the fold. |
@@ -438,7 +463,7 @@ Sources/CDotmeter              C shim: libproc, rusage and the SMC parameter str
 Sources/DotmeterShared         What the app and its helper share: their messages and the rule for what may be deleted
 Sources/DotmeterHelper         The uninstall helper, a launch daemon that runs with the system's rights
 Sources/Dotmeter/App           AppKit shell: menu bar items and their renderer, floating panel, window, menus, quitting apps, debug tools
-Sources/Dotmeter/Model         Snapshot types, SystemMonitor polling loop, settings, the timeline store, events and alerts, speed test, login items
+Sources/Dotmeter/Model         Snapshot types, SystemMonitor polling loop, settings, the timeline store, events and alerts, speed test, login items, updates
 Sources/Dotmeter/Collectors    One sampler per subsystem
 Sources/Dotmeter/Storage       Disk scanner, demo dataset, storage state machine
 Sources/Dotmeter/Claude        Keychain, streaming client, prompts, report schema, analysis session, Explain

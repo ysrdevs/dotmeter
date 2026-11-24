@@ -171,6 +171,7 @@ struct Sidebar: View {
     private var footer: some View {
         let severity = monitor.severity
         return VStack(alignment: .leading, spacing: 9) {
+            UpdateNotice()
             PXDivider().padding(.horizontal, -10)
             HStack(spacing: 8) {
                 SeverityDot(color: Theme.color(for: severity))

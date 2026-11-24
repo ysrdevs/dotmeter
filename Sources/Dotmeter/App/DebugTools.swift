@@ -433,6 +433,8 @@ enum DebugTools {
             await storageSelfTest(models: models)
         case "uninstall":
             await uninstallSelfTest()
+        case "update":
+            await updateSelfTest()
         default:
             print("unknown self-test: \(name)")
         }

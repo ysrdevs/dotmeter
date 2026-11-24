@@ -9,6 +9,14 @@ struct SettingsView: View {
     @State private var keyError: String?
     @State private var launchAtLogin = false
     @Environment(UninstallHelper.self) private var helper
+    @Environment(UpdateModel.self) private var updates
+
+    private var updateStatus: String {
+        if let release = updates.release, updates.waiting { return "\(release.version) is available" }
+        if updates.phase == .checking { return "Checking…" }
+        guard let checked = updates.checkedAt else { return "Not checked yet" }
+        return "Checked \(checked.formatted(.relative(presentation: .named)))"
+    }
 
     private var helperStatus: String {
         switch helper.state {
@@ -209,7 +217,25 @@ struct SettingsView: View {
             }
 
             Section {
-                LabeledContent("\(App.name)", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
+                LabeledContent("\(App.name) \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")") {
+                    HStack(spacing: 8) {
+                        Text(updateStatus).foregroundStyle(.secondary)
+                        if updates.waiting {
+                            Button("Update…") { updates.present(false) }
+                        } else {
+                            Button("Check Now") { updates.check() }.disabled(updates.phase == .checking)
+                        }
+                    }
+                }
+                .id("updates")
+                Toggle("Check for updates every day", isOn: $settings.updateChecks)
+            } header: {
+                Text("Updates")
+            } footer: {
+                footer("A check asks GitHub which version is the newest and sends nothing about this Mac. A new version is downloaded only when you press Install, and it is installed only if it is signed by \(App.possessive) developer and notarized by Apple.")
+            }
+
+            Section {
                 Text("A menu bar check-up for your Mac. Built with Swift; answers come from Claude or GPT, with your own key.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

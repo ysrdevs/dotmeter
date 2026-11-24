@@ -14,6 +14,7 @@ final class AppModels {
     let cables = CableStore()
     let uninstallHelper = UninstallHelper()
     let publicAddress = PublicAddress()
+    let updates = UpdateModel()
 
     init() {
         analysis.storageSummary = { [weak storage] in storage?.claudeSummary }
@@ -52,6 +53,7 @@ extension View {
             .environment(models.cables)
             .environment(models.uninstallHelper)
             .environment(models.publicAddress)
+            .environment(models.updates)
             .environment(models.loginItems)
             .environment(AppSettings.shared)
     }

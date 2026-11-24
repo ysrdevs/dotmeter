@@ -14,6 +14,9 @@ enum MainMenu {
         let settings = NSMenuItem(title: "Settings…", action: #selector(StatusController.openSettings(_:)), keyEquivalent: ",")
         settings.target = target
         appMenu.addItem(settings)
+        let update = NSMenuItem(title: "Check for Updates…", action: #selector(StatusController.checkForUpdates(_:)), keyEquivalent: "")
+        update.target = target
+        appMenu.addItem(update)
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide \(App.name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())

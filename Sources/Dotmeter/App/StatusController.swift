@@ -48,6 +48,7 @@ final class StatusController: NSObject, NSWindowDelegate {
     private let router = AppRouter()
     private var settingsWindow: NSWindow?
     private var settingsOpen = false
+    private var updateWindow: NSWindow?
 
     init(models: AppModels) {
         self.models = models
@@ -68,6 +69,8 @@ final class StatusController: NSObject, NSWindowDelegate {
         }
         trackSettings()
         trackRouter()
+        models.updates.present = { [weak self] quietly in self?.showUpdateWindow(quietly: quietly) }
+        if UpdateModel.demo != nil, ProcessInfo.processInfo.environment["DOTMETER_CAPTURE_UPDATE"] == nil { showUpdateWindow(quietly: true) }
     }
 
     // MARK: Menu bar items
@@ -405,6 +408,10 @@ final class StatusController: NSObject, NSWindowDelegate {
         let preferences = NSMenuItem(title: "Settings…", action: #selector(openSettings(_:)), keyEquivalent: ",")
         preferences.target = self
         menu.addItem(preferences)
+        let waiting = models.updates.waiting ? models.updates.release?.version : nil
+        let update = NSMenuItem(title: waiting.map { "Update to \($0)…" } ?? "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+        update.target = self
+        menu.addItem(update)
         menu.addItem(.separator())
 
         let heading = NSMenuItem(title: "Show in Menu Bar", action: nil, keyEquivalent: "")
@@ -501,6 +508,16 @@ final class StatusController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        if let closing = notification.object as? NSWindow, closing === updateWindow {
+            // Nothing in it is worth keeping between one version and the next.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.updateWindow === closing, !closing.isVisible else { return }
+                closing.delegate = nil
+                closing.contentViewController = nil
+                self.updateWindow = nil
+            }
+            return
+        }
         if (notification.object as? NSWindow) === settingsWindow {
             settingsOpen = false
             updateCadence()
@@ -567,6 +584,52 @@ final class StatusController: NSObject, NSWindowDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
         settingsOpen = true
         updateCadence()
+    }
+
+    // MARK: Updates
+
+    /// From the menus: ask now, or go back to a version that is already waiting.
+    @objc func checkForUpdates(_ sender: Any?) {
+        closePanel()
+        if models.updates.waiting { showUpdateWindow(quietly: false) } else { models.updates.check() }
+    }
+
+    /// `quietly` when the daily look found something by itself: the window comes to the front of what is on
+    /// screen without taking the keyboard from whatever is being typed into.
+    func showUpdateWindow(quietly: Bool) {
+        if updateWindow == nil {
+            let view = UpdateView(close: { [weak self] in self?.updateWindow?.close() })
+                .dotmeterModels(models)
+            let host = NSHostingController(rootView: view)
+            host.sizingOptions = [.preferredContentSize]
+            let window = NSWindow(contentViewController: host)
+            window.title = "\(App.name) Update"
+            window.styleMask = [.titled, .closable, .fullSizeContentView]
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.isMovableByWindowBackground = true
+            window.isReleasedWhenClosed = false
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.backgroundColor = NSColor(UpdateView.background)
+            window.center()
+            window.delegate = self
+            updateWindow = window
+        }
+        if quietly {
+            updateWindow?.orderFrontRegardless()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            updateWindow?.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    /// A download, or the moment the new copy takes this one's place, is not to be closed from under.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if sender === updateWindow, models.updates.busy {
+            if case .restarting = models.updates.phase { return false }
+            models.updates.cancel()
+        }
+        return true
     }
 
     // MARK: Debug
@@ -708,6 +771,12 @@ final class StatusController: NSObject, NSWindowDelegate {
             // DOTMETER_CAPTURE_MENUBAR=path: every area's menu bar item in every style, on dark and light strips.
             if let path = env["DOTMETER_CAPTURE_MENUBAR"], let snapshot = monitor.snapshot {
                 MenuBarRenderer.writeSheet(to: path, snapshot: snapshot, history: monitor.history, storage: storage)
+            }
+            // DOTMETER_CAPTURE_UPDATE=path: the update window as it stands (with DOTMETER_UPDATE_DEMO, a made-up one).
+            if let path = env["DOTMETER_CAPTURE_UPDATE"] {
+                showUpdateWindow(quietly: true)
+                try? await Task.sleep(for: .seconds(1.5))
+                if let view = updateWindow?.contentView { Self.capture(view, to: path) }
             }
             if let path = env["DOTMETER_CAPTURE_SETTINGS"] {
                 openSettings(nil)
