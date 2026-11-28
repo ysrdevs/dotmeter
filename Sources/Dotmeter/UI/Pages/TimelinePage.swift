@@ -481,6 +481,11 @@ struct EventsPanel: View {
             .padding(.bottom, 10)
         }
         .animation(.snappy(duration: 0.25), value: open)
+        .onAppear {
+            // Debug: DOTMETER_DEBUG_EVENT=crash opens the newest event of that kind, for captures.
+            guard let kind = ProcessInfo.processInfo.environment["DOTMETER_DEBUG_EVENT"].flatMap(TimelineEvent.Kind.init(rawValue:)) else { return }
+            open = store.events.last { $0.kind == kind }?.id
+        }
     }
 
     private static let stamp: DateFormatter = {
@@ -492,6 +497,8 @@ struct EventsPanel: View {
     private func row(_ event: TimelineEvent) -> some View {
         let isOpen = open == event.id
         let key = "event:" + event.id.uuidString
+        // Noted by the activity watch: the app listed is the one it happened to, not what was busy at the time.
+        let noted = event.kind == .microphone || event.kind == .camera || event.kind == .crash
         return VStack(spacing: 0) {
             HStack(spacing: 11) {
                 ZStack {
@@ -537,9 +544,11 @@ struct EventsPanel: View {
                         .font(PX.font(11.5))
                         .monospacedDigit()
                         .foregroundStyle(PX.label)
-                    Text(event.end == nil ? "still going" : "for \(event.duration < 90 ? "\(Int(event.duration)) s" : Format.duration(event.duration))")
-                        .font(PX.font(11))
-                        .foregroundStyle(PX.tertiary)
+                    if let length = Self.length(event) {
+                        Text(length)
+                            .font(PX.font(11))
+                            .foregroundStyle(PX.tertiary)
+                    }
                 }
             }
             .padding(.horizontal, 10)
@@ -552,7 +561,7 @@ struct EventsPanel: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if !event.apps.isEmpty {
                         HStack(spacing: 16) {
-                            Text("On top at its worst").font(PX.font(11.5)).foregroundStyle(PX.tertiary)
+                            Text(noted ? (event.kind == .crash ? "App" : "Used by") : "On top at its worst").font(PX.font(11.5)).foregroundStyle(PX.tertiary)
                             ForEach(Array(event.apps.prefix(4).enumerated()), id: \.offset) { _, app in
                                 HStack(spacing: 6) {
                                     Image(nsImage: IconCache.icon(forBundlePath: app.bundlePath))
@@ -560,7 +569,7 @@ struct EventsPanel: View {
                                         .interpolation(.high)
                                         .frame(width: 14, height: 14)
                                     Text(app.name).font(PX.font(11.5, .medium)).foregroundStyle(PX.label).lineLimit(1)
-                                    Text(Format.cpu(app.cpu)).font(PX.font(11.5)).monospacedDigit().foregroundStyle(PX.secondary)
+                                    if !noted { Text(Format.cpu(app.cpu)).font(PX.font(11.5)).monospacedDigit().foregroundStyle(PX.secondary) }
                                 }
                             }
                             Spacer(minLength: 0)
@@ -571,7 +580,10 @@ struct EventsPanel: View {
                         Text(Self.peaks(event)).font(PX.font(11.5)).monospacedDigit().foregroundStyle(PX.secondary).frame(height: 20)
                     }
                     HStack(spacing: 7) {
-                        PXButton(title: "Ask \(AIProvider.current.assistant) why", symbol: "sparkles", enabled: !explainer.isStreaming(key) && monitor.snapshot != nil, height: 26) { ask(event, key: key) }
+                        // Why an app was on a call is not in any reading; why it crashed may be.
+                        if event.kind != .microphone && event.kind != .camera {
+                            PXButton(title: "Ask \(AIProvider.current.assistant) why", symbol: "sparkles", enabled: !explainer.isStreaming(key) && monitor.snapshot != nil, height: 26) { ask(event, key: key) }
+                        }
                         PXButton(title: "Forget", symbol: "trash", style: .ghost, height: 26) {
                             explainer.dismiss(key)
                             store.remove(event.id)
@@ -590,6 +602,13 @@ struct EventsPanel: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    /// How long it lasted, under the time it began. A crash has no length: one that repeated says over how long.
+    private static func length(_ event: TimelineEvent) -> String? {
+        if event.end == nil { return "still going" }
+        if event.kind == .crash { return (event.count ?? 1) > 1 && event.duration >= 60 ? "over \(Format.duration(event.duration))" : nil }
+        return "for \(event.duration < 90 ? "\(Int(event.duration)) s" : Format.duration(event.duration))"
     }
 
     private static func peaks(_ event: TimelineEvent) -> String {

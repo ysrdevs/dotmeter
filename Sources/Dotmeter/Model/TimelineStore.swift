@@ -156,8 +156,10 @@ struct TimelineEvent: Codable, Identifiable {
     var peakCelsius: Double?
     var peakRPM: Double?
     var peakCPU: Double?
-    /// What was on top when it was at its worst.
+    /// What was on top when it was at its worst. For a use of the microphone or a crash, the app it was.
     var apps: [App] = []
+    /// How many times it happened, where one event stands for several: an app that crashed four times in an hour.
+    var count: Int?
 
     var duration: TimeInterval { (end ?? Date()).timeIntervalSince(start) }
 }
@@ -187,6 +189,9 @@ final class TimelineStore {
     @ObservationIgnored private var dirty = false
     @ObservationIgnored private var lastSave = Date()
     @ObservationIgnored private let url: URL?
+    /// The crash reports already written into the events, by their own identifiers, each with its time: a
+    /// report is never counted twice, even after its event was forgotten.
+    @ObservationIgnored private(set) var crashReports: [String: Date] = [:]
 
     /// Debug: DOTMETER_TIMELINE_DEMO=1 fills in a made-up week and never writes it down.
     static let demo = ProcessInfo.processInfo.environment["DOTMETER_TIMELINE_DEMO"] == "1"
@@ -198,6 +203,8 @@ final class TimelineStore {
         var speedTests: [SpeedResult]
         /// Absent in files written before 1.3.
         var days: [EnergyDay]?
+        /// Absent in files written before 2.2.
+        var crashReports: [String: Date]?
     }
 
     private static let dayFormat: DateFormatter = {
@@ -258,6 +265,7 @@ final class TimelineStore {
             recordingSince = file.recordingSince
             // A file from before the ledger existed still holds up to a week of minutes to start it from.
             energyDays = file.days ?? Self.ledger(from: file.minutes)
+            crashReports = file.crashReports ?? [:]
             dirty = false
         }
     }
@@ -363,8 +371,10 @@ final class TimelineStore {
 
     // MARK: Events
 
+    /// Events stay in the order they began. Nearly always that is at the end; a crash found in a report from
+    /// days ago goes where it belongs.
     func begin(_ event: TimelineEvent) {
-        events.append(event)
+        events.insert(event, at: (events.lastIndex { $0.start <= event.start } ?? -1) + 1)
         if events.count > Self.keepEvents { events.removeFirst(events.count - Self.keepEvents) }
         dirty = true
     }
@@ -377,6 +387,14 @@ final class TimelineStore {
 
     func remove(_ id: UUID) {
         events.removeAll { $0.id == id }
+        dirty = true
+    }
+
+    /// Remembers that these crash reports are in the events. Reports older than the folders are looked through
+    /// for are let go.
+    func noteCrashReports(_ reports: [String: Date], now: Date = Date()) {
+        crashReports.merge(reports) { first, _ in first }
+        crashReports = crashReports.filter { now.timeIntervalSince($0.value) < 8 * 86_400 }
         dirty = true
     }
 
@@ -395,7 +413,7 @@ final class TimelineStore {
         lastSave = Date()
         guard dirty, let url, !Self.demo else { return }
         dirty = false
-        let file = File(recordingSince: recordingSince, minutes: minutes, events: events, speedTests: speedTests, days: energyDays)
+        let file = File(recordingSince: recordingSince, minutes: minutes, events: events, speedTests: speedTests, days: energyDays, crashReports: crashReports)
         Task.detached(priority: .utility) {
             guard let data = try? JSONEncoder().encode(file) else { return }
             try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -407,7 +425,7 @@ final class TimelineStore {
     func saveNow() {
         flush()
         guard dirty, let url, !Self.demo else { return }
-        let file = File(recordingSince: recordingSince, minutes: minutes, events: events, speedTests: speedTests, days: energyDays)
+        let file = File(recordingSince: recordingSince, minutes: minutes, events: events, speedTests: speedTests, days: energyDays, crashReports: crashReports)
         guard let data = try? JSONEncoder().encode(file) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
@@ -647,6 +665,19 @@ enum TimelineDemo {
         offline.apps = []
         events.append(offline)
         events.append(TimelineEvent(kind: .disk, start: base.addingTimeInterval(-260_000), end: base.addingTimeInterval(-252_000), summary: "18 GB free of 2 TB"))
+        // What the activity watch notes: a call, with the camera on for part of it, and two apps that went down.
+        func noted(_ kind: TimelineEvent.Kind, _ start: Double, _ length: Double, app: (String, String)?, times: Int = 1) {
+            let user = ActivityUser(key: "", name: app?.0, bundlePath: app?.1)
+            let summary = kind == .crash ? ActivityWords.crashed(app?.0 ?? "", times: times) : ActivityWords.finished(kind, user: user, seconds: length)
+            var event = TimelineEvent(kind: kind, start: base.addingTimeInterval(start), end: base.addingTimeInterval(start + length), summary: summary)
+            event.apps = app.map { [.init(name: $0.0, bundlePath: $0.1, cpu: 0)] } ?? []
+            event.count = times > 1 ? times : nil
+            events.append(event)
+        }
+        noted(.microphone, -9_800, 1_860, app: ("FaceTime", "/System/Applications/FaceTime.app"))
+        noted(.camera, -9_770, 720, app: nil)
+        noted(.crash, -5_900, 2_100, app: ("Safari", "/Applications/Safari.app"), times: 4)
+        noted(.crash, -64_000, 0, app: ("Blender", "/Applications/Blender.app"))
         events.sort { $0.start < $1.start }
         let speeds = (0..<8).map { index in
             SpeedResult(date: base.addingTimeInterval(-Double(7 - index) * 86_400 * 0.9), down: (430 + 70 * noise(index, 41)) * 1e6, up: (62 + 16 * noise(index, 43)) * 1e6, responsiveness: 900 + 500 * noise(index, 47), baseRTT: 12 + 5 * noise(index, 53), interface: "en1")
