@@ -15,6 +15,10 @@ struct Snapshot: Codable {
     var system: SystemInfo
     /// Ports, cables and what is on them. Only read while something shows it or a saved cable is being followed.
     var usb: USBStats? = nil
+    /// The internal drive's own health record (SMART). Read at launch and every ten minutes; nil where the drive keeps none.
+    var drive: DriveHealth? = nil
+    /// Keyboards, mice and other accessories that report a battery level. Empty or nil when none does.
+    var accessories: [AccessoryBattery]? = nil
 }
 
 struct CPUStats: Codable {

@@ -56,6 +56,7 @@ enum AnalysisPrompt {
             detail.append("Cached files \(Format.bytes(s.memory.cached)), swap used \(Format.bytes(s.memory.swapUsed)).")
         case .storage:
             focus = "Storage: what is filling the disk, and what could safely be freed?"
+            if let drive = s.drive { detail.append(drive.summaryLine) }
             detail.append("Disk activity now: reading \(Format.rate(s.disk.readBytesPerSecond)), writing \(Format.rate(s.disk.writeBytesPerSecond)). Busiest: " + s.apps.sorted { $0.disk > $1.disk }.prefix(5).filter { $0.disk > 1000 }.map { "\($0.name) read \(Format.rate($0.diskRead)) write \(Format.rate($0.diskWrite))" }.joined(separator: ", "))
         case .thermal:
             focus = "Thermals: why is it this temperature, where is the heat, and are the fans justified?"
@@ -75,6 +76,7 @@ enum AnalysisPrompt {
             if let battery = s.power.battery {
                 detail.append("Battery \(Int(battery.charge * 100))%, \(battery.isCharging ? "charging" : (battery.isPluggedIn ? "plugged in, not charging" : "on battery")), \(battery.cycles.map { "\($0) cycles" } ?? ""), health \(battery.health.map { "\(Int($0 * 100))%" } ?? "unknown"), \(battery.minutesRemaining.map { "\($0) minutes left" } ?? "no estimate").")
             }
+            if let accessories = AccessoryBattery.summaryLine(s.accessories) { detail.append(accessories) }
             detail.append("Apps by power billed to them: " + s.apps.sorted { $0.power > $1.power }.prefix(8).filter { $0.power > 0.02 }.map { "\($0.name) \(String(format: "%.2f W", $0.power))" }.joined(separator: ", "))
         case .battery:
             focus = "Battery: how is the charge and the battery's health, what is draining it, and how long will it last?"

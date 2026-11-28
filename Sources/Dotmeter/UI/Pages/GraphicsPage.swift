@@ -185,6 +185,7 @@ struct PowerPage: View {
                     }
                 }
                 if s.power.battery != nil { EnergyDayPanel(snapshot: s, width: gridWidth) }
+                if let accessories = s.accessories, !accessories.isEmpty { AccessoriesPanel(accessories: accessories, width: gridWidth) }
                 EnergyCostPanel(width: gridWidth)
                 AppTablePanel(title: "Apps by energy", apps: Array(s.apps.filter { $0.power > 0.005 }.sorted { $0.power > $1.power }.prefix(18)), metric: .power, width: gridWidth, expanded: $expanded)
             } else {

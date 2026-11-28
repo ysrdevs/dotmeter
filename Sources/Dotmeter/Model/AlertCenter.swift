@@ -21,6 +21,9 @@ final class AlertCenter {
     /// event that is running for it. Nil until the ports have been read once: what was already slow when Dotmeter
     /// started is not news.
     private var slowConnections: [String: UUID?]?
+    /// Accessories whose own battery ran low: which have been told, and the event running for each.
+    private var accessoryWatch = AccessoryWatch()
+    private var accessoryEvents: [String: UUID] = [:]
     private var available: Bool { Bundle.main.bundleIdentifier != nil }
 
     func attach(to monitor: SystemMonitor, store: TimelineStore) {
@@ -99,6 +102,9 @@ final class AlertCenter {
         // Something plugged in that runs slower than it could.
         if let usb = s.usb { checkPorts(USBOverview.of(usb), at: s.timestamp) }
 
+        // A keyboard, mouse or other accessory whose own battery has run low.
+        if let accessories = s.accessories { checkAccessories(accessories, at: s.timestamp) }
+
         // The connection.
         if s.network.online { wasOnline = true }
         check(.offline, holds: wasOnline && !s.network.online, s: s, top: []) {
@@ -128,6 +134,22 @@ final class AlertCenter {
             notifyPort(port, verdict: verdict)
         }
         slowConnections = known
+    }
+
+    /// One event per accessory that falls to 15% or under, from that reading until it is back above 20% or
+    /// gone. Each knocks once: a level is not a noisy reading, so there is no twenty-second wait.
+    private func checkAccessories(_ list: [AccessoryBattery], at time: Date) {
+        for change in accessoryWatch.step(list) {
+            switch change {
+            case .low(let device):
+                let event = TimelineEvent(kind: .accessory, start: time, summary: device.lowSummary)
+                store?.begin(event)
+                accessoryEvents[device.id] = event.id
+                notifyAccessory(device)
+            case .over(let id):
+                if let event = accessoryEvents.removeValue(forKey: id) { store?.update(event) { $0.end = time } }
+            }
+        }
     }
 
     private func notifyPort(_ port: USBOverview.Port, verdict: USBVerdict) {

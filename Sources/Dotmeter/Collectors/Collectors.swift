@@ -33,6 +33,7 @@ final class Collectors {
     private let network = NetworkSampler()
     private let power = PowerSampler()
     private let usb = USBSampler()
+    private let health = HealthSampler()
     private var last: Snapshot?
 
     /// Debug: the power channels as last read.
@@ -69,7 +70,10 @@ final class Collectors {
             apps: apps,
             processes: procs,
             system: SystemInfoProvider.current(memoryTotal: memoryStats.total),
-            usb: options.usb ? usb.sample() : last?.usb
+            usb: options.usb ? usb.sample() : last?.usb,
+            // Both keep their own slow clocks and answer from memory in between.
+            drive: health.drive(),
+            accessories: health.accessories()
         )
         // Debug: DOTMETER_APPS_DEMO=1 puts made-up apps in place of the real ones (see `AppsDemo`).
         let shown = AppsDemo.on ? AppsDemo.apply(snapshot) : snapshot

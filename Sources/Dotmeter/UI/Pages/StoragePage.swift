@@ -25,6 +25,7 @@ struct StoragePage: View {
                     TopAppsPanel.disk(snapshot)
                 }
             }
+            if let drive = monitor.snapshot?.drive { DriveHealthPanel(drive: drive, width: gridWidth) }
             LargestItemsPanel(category: $category, query: $appQuery, width: gridWidth)
                 .id("largest")
         }

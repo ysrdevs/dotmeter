@@ -288,4 +288,7 @@ static inline int dotmeter_ping(const char *address, int timeout_ms, uint16_t se
     return result;
 }
 
+// The NVMe SMART log, read through a plug-in interface that only C can call.
+#include "DotmeterSMART.h"
+
 #endif
