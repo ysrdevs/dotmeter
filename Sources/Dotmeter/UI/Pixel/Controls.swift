@@ -174,7 +174,7 @@ struct ExplainCard: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(AppSection.claude.rgb.color())
-                    Text(heading ?? "\(AIProvider.current.assistant) on \(section == .dashboard ? "this Mac" : section.title.lowercased())")
+                    Text(heading ?? "\(AIProvider.current.assistant) on \(section.explainSubject)")
                         .font(PX.font(13, .medium))
                         .tracking(PX.tracking(13))
                         .foregroundStyle(PX.text)
@@ -313,5 +313,19 @@ struct TopAppsPanel: View {
             }
         }
         .frame(height: 342.75)
+    }
+}
+
+extension AppSection {
+    /// The area as the heading over an explanation names it: "Claude on the processor" reads wrong, "Claude on
+    /// processor" is how the cards have always put it, and a few names do not survive being lower-cased.
+    var explainSubject: String {
+        switch self {
+        case .dashboard: return "this Mac"
+        case .usb: return "USB"
+        case .macs: return "your Macs"
+        case .models: return "local models"
+        default: return title.lowercased()
+        }
     }
 }
