@@ -59,6 +59,7 @@ extension View {
             .environment(models.updates)
             .environment(models.runners)
             .environment(models.macs)
+            .environment(models.watch)
             .environment(models.loginItems)
             .environment(AppSettings.shared)
     }

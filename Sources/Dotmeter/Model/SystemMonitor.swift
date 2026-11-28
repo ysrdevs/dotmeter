@@ -37,6 +37,23 @@ final class SystemMonitor {
     @ObservationIgnored var menuBarLive = false {
         didSet { if menuBarLive != oldValue { restartLoop() } }
     }
+    /// Reasons to keep the counters at the fast pace while no panel or window is open, other than a menu bar
+    /// item: the floating meter, another Mac watching this one. Each says whether it also wants the graphics
+    /// load, which a light pass leaves out unless asked. Nothing is published to SwiftUI for these: whoever asks
+    /// reads the readings through `addObserver`.
+    @ObservationIgnored private var backgroundReasons: [String: Bool] = [:]
+
+    func setBackgroundLive(_ reason: String, on: Bool, graphics: Bool = false) {
+        let now: Bool? = on ? graphics : nil
+        guard backgroundReasons[reason] != now else { return }
+        let was = backgroundLive
+        backgroundReasons[reason] = now
+        if backgroundLive != was { restartLoop() }
+    }
+
+    /// A menu bar item or anything else wants live figures while nothing is open.
+    private var backgroundLive: Bool { menuBarLive || !backgroundReasons.isEmpty }
+
     /// Something on screen shows per-app network traffic: how often to read it, in seconds. Each reading
     /// costs a helper process, so it is nil the rest of the time.
     @ObservationIgnored var networkAppsEvery: Double? {
@@ -132,7 +149,7 @@ final class SystemMonitor {
         loopTask = Task { [weak self] in
             while let self, !Task.isCancelled {
                 let detailed = self.panelVisible && self.detailWanted
-                let fullEvery = self.menuBarLive && !self.panelVisible ? Self.fullEveryWhenLive : Self.heartbeat
+                let fullEvery = self.backgroundLive && !self.panelVisible ? Self.fullEveryWhenLive : Self.heartbeat
                 let full = detailed || !self.primed || Date().timeIntervalSince(self.lastFull) >= fullEvery - 0.5
                 await self.refreshNow(full: full)
                 // CPU percentages are deltas; take a quick second reading at launch so the first open is never blank.
@@ -140,7 +157,7 @@ final class SystemMonitor {
                 if !self.primed { self.primed = true; interval = 1 }
                 else if let override = ProcessInfo.processInfo.environment["DOTMETER_INTERVAL"].flatMap(Double.init) { interval = override }
                 else if self.panelVisible { interval = AppSettings.shared.refreshInterval }
-                else { interval = self.menuBarLive ? max(AppSettings.shared.refreshInterval, 2) : Self.heartbeat }
+                else { interval = self.backgroundLive ? max(AppSettings.shared.refreshInterval, 2) : Self.heartbeat }
                 try? await Task.sleep(for: .seconds(interval))
             }
         }
@@ -153,7 +170,7 @@ final class SystemMonitor {
         let collectors = self.collectors
         var options = CollectOptions()
         options.light = !full
-        options.graphics = !full && panelVisible
+        options.graphics = !full && (panelVisible || backgroundReasons.values.contains(true))
         options.networkApps = full && panelVisible ? networkAppsEvery : nil
         options.networkLatency = full && panelVisible && networkLatencyWanted
         options.networkPorts = full && panelVisible && networkPortsWanted

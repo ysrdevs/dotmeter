@@ -184,7 +184,11 @@ final class AlertCenter {
         notify(event, s: s)
     }
 
-    private func notify(_ event: TimelineEvent, s: Snapshot) {
+    /// For events that do not come from a reading (an app that crashed, the microphone coming on): sends the
+    /// notification if that kind is switched on in Settings. The event itself is the caller's to write down.
+    func announce(_ event: TimelineEvent) { notify(event, s: nil) }
+
+    private func notify(_ event: TimelineEvent, s: Snapshot?) {
         guard available, AppSettings.shared.notifies(event.kind) else { return }
         guard Date().timeIntervalSince(lastNotified[event.kind] ?? .distantPast) > 600 else { return }
         lastNotified[event.kind] = Date()
@@ -205,7 +209,7 @@ final class AlertCenter {
         case .accessory: content.title = "An accessory's battery is low"
         }
         var parts = [event.summary]
-        if event.kind == .hot || event.kind == .throttled {
+        if let s, event.kind == .hot || event.kind == .throttled {
             if let hottest = s.thermal.hottest { parts.append(Format.temperature(hottest.celsius)) }
             if !s.thermal.fans.isEmpty { parts.append("fans at \(Format.rpm(s.thermal.averageRPM)) rpm") }
         }

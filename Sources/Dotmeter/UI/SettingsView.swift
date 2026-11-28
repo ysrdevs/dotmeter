@@ -178,6 +178,10 @@ struct SettingsView: View {
                 Stepper("Gigabytes: \(Int(settings.diskAlertGB))", value: $settings.diskAlertGB, in: 5...500, step: 5)
                 Toggle("The connection drops", isOn: notifies(.offline))
                 Toggle("Something plugged in runs slower than it could", isOn: notifies(.usb))
+                Toggle("An accessory's battery runs low", isOn: notifies(.accessory))
+                Toggle("An app crashes", isOn: notifies(.crash))
+                Toggle("An app starts using the microphone", isOn: notifies(.microphone))
+                Toggle("The camera comes on", isOn: notifies(.camera))
                 if Hardware.hasBattery {
                     Toggle("The battery falls under \(Int(settings.batteryAlertPercent))%", isOn: notifies(.battery))
                     Stepper("Percent: \(Int(settings.batteryAlertPercent))", value: $settings.batteryAlertPercent, in: 5...50, step: 5)

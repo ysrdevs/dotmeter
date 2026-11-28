@@ -186,6 +186,7 @@ struct Sidebar: View {
     private var footer: some View {
         let severity = monitor.severity
         return VStack(alignment: .leading, spacing: 9) {
+            ActivityNotice()
             UpdateNotice()
             PXDivider().padding(.horizontal, -10)
             HStack(spacing: 8) {
