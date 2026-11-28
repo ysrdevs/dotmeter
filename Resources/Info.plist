@@ -40,7 +40,11 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Dotmeter</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_dotmeter._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Dotmeter times a small echo to your router to measure latency while the Network area is open.</string>
+	<string>Dotmeter times a small echo to your router to measure latency while the Network area is open, and finds your other Macs when you switch that on.</string>
 </dict>
 </plist>

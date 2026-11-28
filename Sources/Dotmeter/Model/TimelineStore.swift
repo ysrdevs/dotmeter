@@ -86,7 +86,7 @@ struct EnergySummary {
 /// Something worth remembering: the Mac ran hot, an app held the processor, the disk ran low, the line dropped.
 struct TimelineEvent: Codable, Identifiable {
     enum Kind: String, Codable, CaseIterable {
-        case hot, throttled, memory, disk, app, offline, battery, usb
+        case hot, throttled, memory, disk, app, offline, battery, usb, microphone, camera, crash, accessory
 
         var title: String {
             switch self {
@@ -98,6 +98,10 @@ struct TimelineEvent: Codable, Identifiable {
             case .offline: return "Offline"
             case .usb: return "Slow connection"
             case .battery: return "Battery low"
+            case .microphone: return "Microphone in use"
+            case .camera: return "Camera in use"
+            case .crash: return "App crashed"
+            case .accessory: return "Accessory battery low"
             }
         }
 
@@ -111,6 +115,10 @@ struct TimelineEvent: Codable, Identifiable {
             case .offline: return "wifi.slash"
             case .usb: return "cable.connector"
             case .battery: return "battery.25percent"
+            case .microphone: return "mic.fill"
+            case .camera: return "video.fill"
+            case .crash: return "exclamationmark.triangle.fill"
+            case .accessory: return "keyboard.fill"
             }
         }
 
@@ -124,6 +132,10 @@ struct TimelineEvent: Codable, Identifiable {
             case .offline: return PX.gray
             case .usb: return PX.lime
             case .battery: return PX.red
+            case .microphone: return PX.orange
+            case .camera: return PX.greenRGB
+            case .crash: return PX.red
+            case .accessory: return PX.yellow
             }
         }
     }

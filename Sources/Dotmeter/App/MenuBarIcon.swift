@@ -166,7 +166,7 @@ enum MenuBarRenderer {
                 glyph: .ports(overview.ports.prefix(columns).map(\.level)), lines: ["\(used)/\(overview.ports.count)"], symbol: section.symbol,
                 tint: overview.slow.isEmpty ? nil : .systemOrange, tooltip: tooltip
             )
-        case .dashboard, .claude, .timeline, .startup:
+        case .dashboard, .claude, .timeline, .startup, .models, .macs:
             return Content(glyph: .gauge(0, pins: false), lines: [], symbol: "waveform.path.ecg", tint: nil, tooltip: "\(App.name)")
         }
     }

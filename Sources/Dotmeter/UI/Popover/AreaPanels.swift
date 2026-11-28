@@ -10,7 +10,7 @@ struct PanelRootView: View {
 
     var body: some View {
         switch section {
-        case .dashboard, .claude, .timeline, .startup:
+        case .dashboard, .claude, .timeline, .startup, .models, .macs:
             PopoverView(maxHeight: maxHeight, openApp: openApp, openSettings: openSettings)
         default:
             AreaPanelView(section: section, openApp: { openApp(section) }, openSettings: openSettings)
@@ -52,7 +52,7 @@ struct AreaPanelView: View {
                 case .power: power(snapshot)
                 case .battery: battery(snapshot)
                 case .usb: ports(snapshot)
-                case .dashboard, .claude, .timeline, .startup: EmptyView()
+                case .dashboard, .claude, .timeline, .startup, .models, .macs: EmptyView()
                 }
             } else {
                 HStack(spacing: 8) {
@@ -131,7 +131,7 @@ struct AreaPanelView: View {
             let overview = USBOverview.of(usb)
             let devices = overview.deviceCount
             return "\(overview.connected.count) of \(overview.ports.count) in use" + (devices > 0 ? " · \(devices) \(devices == 1 ? "device" : "devices")" : "")
-        case .dashboard, .claude, .timeline, .startup:
+        case .dashboard, .claude, .timeline, .startup, .models, .macs:
             return ""
         }
     }

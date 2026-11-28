@@ -435,6 +435,22 @@ enum DebugTools {
             await uninstallSelfTest()
         case "update":
             await updateSelfTest()
+        case "wall":
+            await wallSelfTest(models: models)
+        case "floating":
+            await floatingSelfTest(models: models)
+        case "card":
+            await cardSelfTest(models: models)
+        case "macs":
+            await macsSelfTest(models: models)
+        case "models":
+            await modelsSelfTest(models: models)
+        case "command":
+            await commandSelfTest(models: models)
+        case "watch":
+            await watchSelfTest(models: models)
+        case "health":
+            await healthSelfTest(models: models)
         default:
             print("unknown self-test: \(name)")
         }

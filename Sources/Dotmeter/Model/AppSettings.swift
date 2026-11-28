@@ -42,6 +42,14 @@ final class AppSettings {
         didSet { if ProcessInfo.processInfo.environment["DOTMETER_DASHBOARD_ORDER"] == nil { defaults.set(dashboardOrder, forKey: "dashboardOrder") } }
     }
 
+    /// The colour the dots are lit in. Debug: DOTMETER_THEME=amber chooses one for a run without saving it.
+    var theme: DotTheme {
+        didSet {
+            if ProcessInfo.processInfo.environment["DOTMETER_THEME"] == nil { defaults.set(theme.rawValue, forKey: "theme") }
+            DotTheme.current = theme
+        }
+    }
+
     /// Who answers: Claude or GPT. Each keeps its own key and its own choice of model.
     var provider: AIProvider {
         didSet {
@@ -98,6 +106,7 @@ final class AppSettings {
 
     private init() {
         provider = AIProvider.current
+        theme = DotTheme.current
         dashboardOrder = ProcessInfo.processInfo.environment["DOTMETER_DASHBOARD_ORDER"]?.split(separator: ",").map(String.init) ?? defaults.stringArray(forKey: "dashboardOrder") ?? []
         model = defaults.string(forKey: "model") ?? AIProvider.anthropic.defaultModel
         let openAIChoice = defaults.string(forKey: AIProvider.openai.modelDefaultsKey)

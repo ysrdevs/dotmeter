@@ -91,6 +91,13 @@ enum AnalysisPrompt {
             focus = "Timeline: what has this Mac been doing over the recorded period, and when did it work hardest?"
         case .startup:
             focus = "Login items: which of these background items matter, and which could go?"
+        case .models:
+            focus = "Local AI models: what is loaded, what is it holding in memory and on the graphics chip, and does this Mac have room for it?"
+            if let gpu = s.gpu {
+                detail.append("Graphics: \(Int(gpu.utilization * 100))% busy, memory in use \(gpu.memoryInUse.map(Format.bytes) ?? "unknown").")
+            }
+        case .macs:
+            focus = "This Mac and the user's other Macs: how do they compare right now?"
         case .dashboard, .claude:
             focus = "The whole Mac: what is it doing right now, and does anything need attention?"
         }

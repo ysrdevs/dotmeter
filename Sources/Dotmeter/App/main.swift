@@ -4,6 +4,9 @@ let arguments = Array(CommandLine.arguments.dropFirst())
 // Under its earlier name the app kept its settings and data elsewhere; bring them along before anything reads one.
 Migration.carryOver()
 
+// `dotmeter status`, `dotmeter mcp` and the rest: the app's readings from a terminal or for an AI app. No window.
+if Command.handles(arguments) { Command.run(arguments) }
+
 if arguments.contains("--dump") {
     DebugTools.dump()
     exit(0)

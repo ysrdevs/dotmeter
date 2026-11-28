@@ -67,18 +67,21 @@ enum PX {
     static let tertiary = Color(hex: 0x727375)
     static let green = Color(hex: 0x57C27A)
 
-    // Category colors, in the order the reference uses them.
-    static let blue = RGB(0x4C8FE8)
-    static let greenRGB = RGB(0x4FCB74)
-    static let pink = RGB(0xE2569C)
-    static let purple = RGB(0x9268E3)
-    static let cyan = RGB(0x36C2DA)
-    static let yellow = RGB(0xE9C63F)
-    static let gray = RGB(0xA8AEB8)
-    static let orange = RGB(0xE7813A)
-    static let red = RGB(0xDE4646)
-    static let lime = RGB(0xA3D34F)
-    static let palette: [RGB] = [blue, greenRGB, pink, purple, cyan, yellow, orange, red]
+    // Category colors, in the order the reference uses them. They follow the theme: see `DotTheme`.
+    static var tones = DotTheme.current.tones
+    static var blue: RGB { tones.blue }
+    static var greenRGB: RGB { tones.green }
+    static var pink: RGB { tones.pink }
+    static var purple: RGB { tones.purple }
+    static var cyan: RGB { tones.cyan }
+    static var yellow: RGB { tones.yellow }
+    static var gray: RGB { tones.gray }
+    static var orange: RGB { tones.orange }
+    static var red: RGB { tones.red }
+    static var lime: RGB { tones.lime }
+    static var teal: RGB { tones.teal }
+    static var indigo: RGB { tones.indigo }
+    static var palette: [RGB] { [blue, greenRGB, pink, purple, cyan, yellow, orange, red] }
 
     static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight)

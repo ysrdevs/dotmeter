@@ -120,7 +120,10 @@ struct TimelinePage: View {
     @State private var day = Calendar.current.startOfDay(for: Date())
 
     var body: some View {
-        PageScaffold(title: "Timeline", subtitle: subtitle, section: .timeline) { gridWidth, columns in
+        PageScaffold(title: "Timeline", subtitle: subtitle, section: .timeline, trailing: AnyView(
+            PXButton(title: "Week card", symbol: "square.and.arrow.up", style: .ghost) { StatusController.shared?.showWeekCard(nil) }
+                .help("A picture of this Mac's week, to save or share")
+        )) { gridWidth, columns in
             if store.minutes.count < 3 && store.events.isEmpty {
                 VStack(alignment: .leading, spacing: 9) {
                     HStack(spacing: 9) {

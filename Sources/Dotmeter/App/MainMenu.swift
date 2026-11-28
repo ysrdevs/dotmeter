@@ -36,6 +36,23 @@ enum MainMenu {
         editItem.submenu = edit
         main.addItem(editItem)
 
+        let viewItem = NSMenuItem()
+        let view = NSMenu(title: "View")
+        let wall = NSMenuItem(title: "Wall", action: #selector(StatusController.toggleWall(_:)), keyEquivalent: "f")
+        wall.keyEquivalentModifierMask = [.command, .shift]
+        wall.target = target
+        view.addItem(wall)
+        let floating = NSMenuItem(title: "Floating Meter", action: #selector(StatusController.toggleFloatingMeter(_:)), keyEquivalent: "m")
+        floating.keyEquivalentModifierMask = [.command, .shift]
+        floating.target = target
+        view.addItem(floating)
+        view.addItem(.separator())
+        let card = NSMenuItem(title: "Week Card…", action: #selector(StatusController.showWeekCard(_:)), keyEquivalent: "")
+        card.target = target
+        view.addItem(card)
+        viewItem.submenu = view
+        main.addItem(viewItem)
+
         let windowItem = NSMenuItem()
         let window = NSMenu(title: "Window")
         window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")

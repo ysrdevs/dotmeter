@@ -130,6 +130,21 @@ struct SettingsView: View {
                 footer("Each area can sit in the menu bar on its own, with a live graph and a panel about just that area. Dashboard is the overview of all of them. One item always stays, so the app can be reached. Right-click any item to add or remove others.")
             }
 
+            Section {
+                Picker("Dot color", selection: $settings.theme) {
+                    ForEach(DotTheme.allCases) { theme in
+                        Text(theme.title).tag(theme)
+                    }
+                }
+                .id("display")
+                WallSettingsRows()
+                FloatingMeterSettingsRows()
+            } header: {
+                Text("Display")
+            } footer: {
+                footer("Color gives each area its own color. The others light every dot in one color; red still means something is wrong. The wall fills a screen with live meters, and the floating meter is a small strip that stays above every window. Both are in the View menu and in the menu of every menu bar item.")
+            }
+
             Section("General") {
                 Picker("Refresh every", selection: $settings.refreshInterval) {
                     Text("Second").tag(1.0)
@@ -196,6 +211,9 @@ struct SettingsView: View {
             } footer: {
                 footer("Echoes go to your router and to \(LatencyProbe.internetHost) every two seconds, only while the Network area is open. The external address is asked of the same host, over HTTPS, when the Network panel or area opens and at most once every five minutes. A speed test runs only when you press its button. With a price set, in dollars, the Power area, its menu bar panel and the Timeline show what the energy cost. The period can also be chosen on the Power page.")
             }
+
+            MacsSettingsSection()
+            CommandSettingsSection()
 
             Section("Sensors") {
                 if let thermal = monitor.snapshot?.thermal {

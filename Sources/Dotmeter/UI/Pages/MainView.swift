@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum AppSection: String, CaseIterable, Identifiable {
-    case dashboard, cpu, gpu, memory, storage, thermal, network, usb, power, battery, timeline, startup, claude
+    case dashboard, cpu, gpu, memory, storage, thermal, network, usb, power, battery, models, timeline, startup, macs, claude
 
     var id: String { rawValue }
 
@@ -19,6 +19,8 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .thermal: return "Thermals"
         case .network: return "Network"
         case .usb: return "USB"
+        case .models: return "Models"
+        case .macs: return "Macs"
         case .claude: return "Ask \(AIProvider.current.assistant)"
         }
     }
@@ -37,6 +39,8 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .thermal: return "thermometer.medium"
         case .network: return "network"
         case .usb: return "cable.connector"
+        case .models: return "brain"
+        case .macs: return "desktopcomputer"
         case .claude: return "sparkles"
         }
     }
@@ -55,12 +59,14 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .thermal: return PX.red
         case .network: return PX.cyan
         case .usb: return PX.lime
+        case .models: return PX.teal
+        case .macs: return PX.indigo
         case .claude: return AIProvider.current == .anthropic ? RGB(0xD97757) : RGB(0x19C37D)
         }
     }
 
     /// Areas that read live figures and can explain themselves; the last group in the sidebar looks back instead.
-    var isLive: Bool { self != .timeline && self != .startup && self != .claude }
+    var isLive: Bool { self != .timeline && self != .startup && self != .claude && self != .macs }
 }
 
 @MainActor
@@ -76,6 +82,8 @@ struct MainView: View {
     @Environment(\.colorScheme) private var scheme
 
     static let sidebarWidth: CGFloat = 208
+    /// Tall enough for every area in the sidebar and the footer under them.
+    static let minHeight: CGFloat = 560
 
     var body: some View {
         HStack(spacing: 0) {
@@ -94,13 +102,16 @@ struct MainView: View {
                 case .thermal: ThermalPage()
                 case .network: NetworkPage()
                 case .usb: USBPage()
+                case .models: RunnersPage()
+                case .macs: MacsPage()
                 case .claude: ClaudePage(openSettings: openSettings)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background((scheme == .dark ? Color(hex: 0x0B0C0D) : Color.white).ignoresSafeArea())
         }
-        .frame(minWidth: Self.sidebarWidth + PX.cardWidth + 48, minHeight: 480)
+        .frame(minWidth: Self.sidebarWidth + PX.cardWidth + 48, minHeight: Self.minHeight)
+        .followsTheme()
     }
 }
 
@@ -111,11 +122,13 @@ struct Sidebar: View {
     @Environment(StorageModel.self) private var storage
     @Environment(AnalysisSession.self) private var analysis
     @Environment(TimelineStore.self) private var timeline
+    @Environment(RunnersModel.self) private var runners
+    @Environment(MacsModel.self) private var macs
 
     /// Live areas, then the two that look back or around, then Claude.
     private static let groups: [[AppSection]] = [
-        [.dashboard, .cpu, .gpu, .memory, .storage, .thermal, .network, .usb, .power] + (Hardware.hasBattery ? [.battery] : []),
-        [.timeline, .startup],
+        [.dashboard, .cpu, .gpu, .memory, .storage, .thermal, .network, .usb, .power] + (Hardware.hasBattery ? [.battery] : []) + [.models],
+        [.timeline, .startup, .macs],
         [.claude],
     ]
 
@@ -164,6 +177,8 @@ struct Sidebar: View {
         case .thermal: return s.thermal.hottest.map { Format.temperature($0.celsius) } ?? s.thermal.state.title
         case .network: return s.network.online ? Format.shortRate(s.network.total) : "Offline"
         case .usb: return s.usb.map { "\($0.connectedPorts.count) of \($0.ports.count)" } ?? ""
+        case .models: return runners.sidebarValue
+        case .macs: return macs.sidebarValue
         case .claude: return analysis.isStreaming ? "…" : (analysis.turns.first?.report?.status?.title ?? "")
         }
     }
@@ -242,6 +257,8 @@ struct PageScaffold<Content: View>: View {
     var section: AppSection?
     /// What only this page knows, handed to Claude along with the question.
     var explainExtra: () -> String? = { nil }
+    /// Something of the page's own beside its title: a button, a switch.
+    var trailing: AnyView? = nil
     @ViewBuilder var content: (_ gridWidth: CGFloat, _ columns: Int) -> Content
 
     static var gap: CGFloat { 20 }
@@ -266,6 +283,7 @@ struct PageScaffold<Content: View>: View {
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 0)
+                        if let trailing { trailing }
                         if let section, section != .claude {
                             ExplainButton(section: section, extra: explainExtra)
                             if AppSettings.menuBarSections.contains(section) {

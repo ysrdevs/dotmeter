@@ -2,9 +2,9 @@ import SwiftUI
 
 /// Colours the USB area uses for its three states.
 enum USBLook {
-    static let live = AppSection.usb.rgb
-    static let caution = PX.orange
-    static let idle = PX.gray
+    static var live: RGB { AppSection.usb.rgb }
+    static var caution: RGB { PX.orange }
+    static var idle: RGB { PX.gray }
 
     static func rgb(_ tone: USBVerdict.Tone?) -> RGB { tone == .caution ? caution : live }
 

@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Shared scales and colors for everything that draws traffic.
 enum NetScale {
-    static let down = PX.cyan
-    static let up = PX.pink
+    static var down: RGB { PX.cyan }
+    static var up: RGB { PX.pink }
 
     /// The next 1-2-5 step above a rate with a little headroom, and never under 100 KB/s, so a quiet
     /// connection reads as quiet instead of filling the chart with noise.

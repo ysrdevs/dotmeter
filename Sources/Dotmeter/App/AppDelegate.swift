@@ -44,6 +44,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         saveOnSignal()
         let controller = StatusController(models: models)
         statusController = controller
+        // What goes on whether or not anything is open: who is using the microphone or camera, which apps crashed,
+        // this Mac being shown to the user's other Macs, and the floating meter if it was left on.
+        models.watch.start(models: models)
+        models.macs.start(models: models)
+        FloatingMeterController.shared.restore(models: models)
 
         // Keys saved under the app's earlier name come over once. macOS asks before it hands over an item another
         // app saved, so this waits off the main thread for the answer.

@@ -199,6 +199,10 @@ final class AlertCenter {
         case .offline: content.title = "The connection dropped"
         case .battery: content.title = "The battery is low"
         case .usb: content.title = "A connection is slower than it could be"
+        case .microphone: content.title = "The microphone is in use"
+        case .camera: content.title = "The camera is in use"
+        case .crash: content.title = "An app crashed"
+        case .accessory: content.title = "An accessory's battery is low"
         }
         var parts = [event.summary]
         if event.kind == .hot || event.kind == .throttled {

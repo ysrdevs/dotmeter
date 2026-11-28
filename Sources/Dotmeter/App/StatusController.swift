@@ -50,12 +50,19 @@ final class StatusController: NSObject, NSWindowDelegate {
     private var settingsOpen = false
     private var updateWindow: NSWindow?
 
+    /// The one controller, for the features that keep their own windows (the wall, the floating meter).
+    private(set) static weak var shared: StatusController?
+    /// Things on screen that are not the panel, the window or Settings, and whether each shows apps or sensors,
+    /// which only a full pass reads. See `setViewer`.
+    private var viewers: [String: Bool] = [:]
+
     init(models: AppModels) {
         self.models = models
         monitor = models.monitor
         analysis = models.analysis
         storage = models.storage
         super.init()
+        Self.shared = self
 
         MainMenu.install(target: self)
         syncItems()
@@ -81,6 +88,7 @@ final class StatusController: NSObject, NSWindowDelegate {
             _ = AppSettings.shared.menuBarItems
             _ = AppSettings.shared.menuBarItemStyles
             _ = AppSettings.shared.latencyEnabled
+            _ = AppSettings.shared.theme
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.syncItems()
@@ -244,11 +252,23 @@ final class StatusController: NSObject, NSWindowDelegate {
         monitor.networkPortsWanted = windowActivity.active && router.section == .network
         // A panel always shows apps or sensors. The window does on its live pages; Settings lists every sensor.
         let windowNeedsDetail = windowActivity.active && router.section.isLive && router.section != .usb
-        monitor.detailWanted = panelActivity.active && panelSection != .usb || windowNeedsDetail || settingsOpen
+        monitor.detailWanted = panelActivity.active && panelSection != .usb || windowNeedsDetail || settingsOpen || viewers.values.contains(true)
         monitor.usbWanted = (panelActivity.active && panelSection == .usb) || (windowActivity.active && router.section == .usb)
         // Settings lists the sensors live, so it counts as something on screen.
-        monitor.panelVisible = panelActivity.active || windowActivity.active || settingsOpen
+        monitor.panelVisible = panelActivity.active || windowActivity.active || settingsOpen || !viewers.isEmpty
     }
+
+    /// Something else is on screen and showing readings (the wall, say), or has stopped. While there is any, the
+    /// readings are published at the pace of an open window. `detail` when it shows apps or every sensor.
+    func setViewer(_ name: String, on: Bool, detail: Bool = false) {
+        let now: Bool? = on ? detail : nil
+        guard viewers[name] != now else { return }
+        viewers[name] = now
+        updateCadence()
+    }
+
+    /// The area the window is on, for a feature that wants to send the user to one.
+    func show(_ section: AppSection) { openWindow(on: section) }
 
     // MARK: Menu bar panel
 
@@ -308,6 +328,7 @@ final class StatusController: NSObject, NSWindowDelegate {
             openSettings: { [weak self] in self?.openSettings(nil) }
         )
         .pxCard(shadow: false)
+        .followsTheme()
         .dotmeterModels(models)
         .environment(\.pxActivity, panelActivity)
 
@@ -414,6 +435,18 @@ final class StatusController: NSObject, NSWindowDelegate {
         menu.addItem(update)
         menu.addItem(.separator())
 
+        let wall = NSMenuItem(title: "Wall", action: #selector(toggleWall(_:)), keyEquivalent: "")
+        wall.target = self
+        wall.state = WallController.shared.isOpen ? .on : .off
+        wall.image = NSImage(systemSymbolName: "rectangle.inset.filled", accessibilityDescription: nil)
+        menu.addItem(wall)
+        let floating = NSMenuItem(title: "Floating Meter", action: #selector(toggleFloatingMeter(_:)), keyEquivalent: "")
+        floating.target = self
+        floating.state = FloatingMeterController.shared.isOn ? .on : .off
+        floating.image = NSImage(systemSymbolName: "pip", accessibilityDescription: nil)
+        menu.addItem(floating)
+        menu.addItem(.separator())
+
         let heading = NSMenuItem(title: "Show in Menu Bar", action: nil, keyEquivalent: "")
         heading.isEnabled = false
         menu.addItem(heading)
@@ -457,6 +490,23 @@ final class StatusController: NSObject, NSWindowDelegate {
         AppSettings.shared.launchAtLogin.toggle()
     }
 
+    // MARK: The wall and the floating meter
+
+    @objc func toggleWall(_ sender: Any?) {
+        closePanel()
+        WallController.shared.toggle(models: models)
+    }
+
+    @objc func toggleFloatingMeter(_ sender: Any?) {
+        closePanel()
+        FloatingMeterController.shared.toggle(models: models)
+    }
+
+    @objc func showWeekCard(_ sender: Any?) {
+        closePanel()
+        WeekCardController.shared.show(models: models)
+    }
+
     // MARK: Desktop window
 
     /// Opens the window, on a particular area when one is given.
@@ -485,7 +535,7 @@ final class StatusController: NSObject, NSWindowDelegate {
             // with the pointer over the window, so that is the only time it is switched on.
             window.isMovableByWindowBackground = NSMouseInRect(NSEvent.mouseLocation, window.frame, false)
             host.view.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: ["window": "main"]))
-            window.contentMinSize = NSSize(width: MainView.sidebarWidth + PX.cardWidth + 48, height: 480)
+            window.contentMinSize = NSSize(width: MainView.sidebarWidth + PX.cardWidth + 48, height: MainView.minHeight)
             window.setContentSize(NSSize(width: MainView.sidebarWidth + PX.cardWidth * 2 + 20 + 64, height: 940))
             window.center()
             // Debug: DOTMETER_WINDOW_SIZE=1458x1700 opens at that content size and leaves the saved frame alone.
@@ -783,6 +833,10 @@ final class StatusController: NSObject, NSWindowDelegate {
                 try? await Task.sleep(for: .seconds(1.5))
                 if let view = settingsWindow?.contentView { Self.capture(view, to: path) }
             }
+            // The features with windows of their own read their own switches.
+            await WallController.shared.debugRun(env, models: models)
+            await FloatingMeterController.shared.debugRun(env, models: models)
+            await WeekCardController.shared.debugRun(env, models: models)
             // DOTMETER_DEBUG_LOOP=scan: demo data only, scan again and again so the scan animation can be measured.
             if env["DOTMETER_DEBUG_LOOP"] == "scan", storage.isDemo {
                 Task { @MainActor [storage] in
@@ -814,7 +868,8 @@ final class StatusController: NSObject, NSWindowDelegate {
         }
     }
 
-    private static func capture(_ view: NSView, to path: String, quiet: Bool = false) {
+    /// Writes a view as it stands to a PNG. For debug captures, the features' own included.
+    static func capture(_ view: NSView, to path: String, quiet: Bool = false) {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         if let png = rep.representation(using: .png, properties: [:]) {

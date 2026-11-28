@@ -15,6 +15,9 @@ final class AppModels {
     let uninstallHelper = UninstallHelper()
     let publicAddress = PublicAddress()
     let updates = UpdateModel()
+    let runners = RunnersModel()
+    let macs = MacsModel()
+    let watch = ActivityWatch()
 
     init() {
         analysis.storageSummary = { [weak storage] in storage?.claudeSummary }
@@ -54,6 +57,8 @@ extension View {
             .environment(models.uninstallHelper)
             .environment(models.publicAddress)
             .environment(models.updates)
+            .environment(models.runners)
+            .environment(models.macs)
             .environment(models.loginItems)
             .environment(AppSettings.shared)
     }
