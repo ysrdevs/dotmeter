@@ -52,6 +52,7 @@ Scan the disk to see what it is made of: apps, developer files, photos, movies, 
 - Clear caches or empty the Trash, or remove one item at a time.
 - **Uninstall an app** with what it left behind: its settings, caches, support files and background items. The row tells you what will go before you confirm. A search finds any installed app, and you can drop an app onto the page.
 - Apps owned by the system are removed by a small helper that macOS asks you to allow once.
+- **Drive health**: how worn the internal drive is, from the drive's own record: the share of its rated life used, how much has been written and read since new, hours powered on, unsafe shutdowns, spare blocks and any warning it has raised.
 
 <p align="center">
   <img src="docs/storage.png" width="820" alt="Storage page">
@@ -63,6 +64,8 @@ Scan the disk to see what it is made of: apps, developer files, photos, movies, 
 ### Thermals and Power
 
 Every temperature sensor and fan, with the hottest readings charted against load. Power shows what the whole Mac draws and which apps the energy goes to, with the cost over a day, a month or a year if you enter your price per kWh. On a laptop there is a Battery area as well.
+
+Power also lists the accessories that report a battery level: keyboards, mice and trackpads, and headphones with their charging cases. A keyboard, mouse or trackpad that falls to 15% gets a note in the Timeline and can send a notification.
 
 <p align="center">
   <img src="docs/thermals.png" width="410" alt="Thermals page">
@@ -95,9 +98,67 @@ Every port and what is on it. For each connection Dotmeter works out what is set
 
 One line a minute is kept for a week: load, heat, fan speed, traffic and power. Events are marked on it, such as the Mac running hot, an app holding several cores, memory pressure, the disk filling up, the connection dropping, or a slow USB connection. Each event can also send a notification.
 
+The Timeline also notes when an app uses the microphone, when the camera comes on, and when an app crashes, and the sidebar shows a quiet line while the microphone or camera is in use. Dotmeter reads only what macOS already publishes for this, so it never asks for microphone or camera permission and never opens either.
+
 <p align="center">
   <img src="docs/timeline.png" width="820" alt="Timeline page">
 </p>
+
+### Week card
+
+View › Week Card… (or the button on the Timeline) makes a picture of your Mac's week: every hour of the last seven days lit by heat, processor or power, with the hottest moment, the busiest hour, the energy used and what it cost. Save it, copy it or share it. Nothing on it says who you are, and one switch leaves app names off.
+
+<p align="center">
+  <img src="docs/week-card.png" width="360" alt="A week card: seven days of heat, with the week's figures">
+</p>
+
+### Models
+
+The local AI models on this Mac: which are loaded in Ollama, LM Studio, llama.cpp or MLX, how much memory each holds out of the total, where it runs, its context and when it will unload, plus what is on disk and what each runner's processes are using. A Speed button sends one short prompt to a loaded model and shows tokens a second and time to the first token. Nothing is asked unless the Models area is open, and only ports on this Mac are asked.
+
+<p align="center">
+  <img src="docs/models.png" width="820" alt="Models page">
+</p>
+
+### Macs
+
+Your other Macs running Dotmeter, side by side with this one: processor, graphics, memory, heat, power and network, the busiest app, disk, battery and uptime on each. Switch it on on both Macs and give them the same code. They find each other on the local network, and nothing can be read without the code. Readings are sent only while another Mac has the page open. It is off until you switch it on.
+
+<p align="center">
+  <img src="docs/macs.png" width="820" alt="Macs page">
+</p>
+
+### Wall and floating meter
+
+Wall (View › Wall, ⇧⌘F) turns a spare display into a wall of live dot-matrix meters: processor, graphics, memory, heat, fans, power, network and disk, each with a large figure and its last five minutes.
+
+<p align="center">
+  <img src="docs/wall.png" width="820" alt="The wall: nine live meters filling a screen">
+</p>
+
+The floating meter (⇧⌘M) is a small strip with processor, graphics, temperature and watts that stays above every window while a game or a render runs. Drag it anywhere; right-click it to choose figures, opacity or click-through. It cannot show frames per second, because macOS does not let one app read another's.
+
+<p align="center">
+  <img src="docs/floating-meter.png" width="295" alt="The floating meter on a dark and a light background">
+</p>
+
+### Dot colors
+
+Settings › Display lights every dot in one color if you like: Amber, Green or White, besides the full-color look. Red still means something is wrong.
+
+<p align="center">
+  <img src="docs/theme-amber.png" width="820" alt="The Dashboard in amber">
+</p>
+
+### Command line and AI apps
+
+Dotmeter also answers from a terminal: `Dotmeter status` prints the whole Mac in a few lines, and `cpu`, `memory`, `network`, `apps`, `timeline` and the rest go deeper, with `--json` for scripts.
+
+```bash
+/Applications/Dotmeter.app/Contents/MacOS/Dotmeter status
+```
+
+`Dotmeter mcp` serves the same readings to an AI app such as Claude over the Model Context Protocol, so you can ask it why your Mac is slow or what ran hot last night. Settings has the lines to copy. The server only reads, and it never gives out an address or a network's name.
 
 ### Ask Claude or GPT
 
@@ -159,6 +220,8 @@ Dotmeter reads your Mac locally. It only uses the network for these, and each ca
 - **External IP** is asked of `1.1.1.1` when the Network area or panel opens.
 - **Speed test** uses Apple's `networkQuality`, only when you press the button.
 - **Update check** asks `api.github.com` once a day which version is the newest. A new version is downloaded from GitHub only when you press Install.
+- **Macs**, if you switch it on, talks to your other Macs on the local network only, encrypted with the code you give them.
+- **Models** asks the model runners on this Mac itself, never another machine.
 
 There are no accounts, analytics or tracking.
 
@@ -167,7 +230,7 @@ There are no accounts, analytics or tracking.
 - **Files and folders**, the first time you scan the disk. Only sizes are read, never contents.
 - **Full Disk Access** is optional and lets the scan measure Photos and the Trash.
 - **Notifications**, if you switch on any alert.
-- **Local network**, for the echo to your router.
+- **Local network**, for the echo to your router, and for finding your other Macs if you switch Macs on.
 - **Login Items**, once, to allow the uninstall helper.
 
 ## Project layout

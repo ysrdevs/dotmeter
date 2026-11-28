@@ -222,7 +222,7 @@ extension DebugTools {
             let storageAsk = AnalysisPrompt.explainMessage(section: .storage, snapshot: shown, history: [], storage: nil, timeline: nil, question: nil, extra: nil)
             let powerAsk = AnalysisPrompt.explainMessage(section: .power, snapshot: shown, history: [], storage: nil, timeline: nil, question: nil, extra: nil)
             check("the Storage explanation is given the drive's record", storageAsk.contains("7% of its rated life used") && storageAsk.contains("48.2 TB written") && storageAsk.contains("no warnings raised"), HealthDemo.drive.summaryLine)
-            check("the Power explanation is given the accessories", powerAsk.contains("Accessory batteries: Desk Mouse 12%, Glass Trackpad 64% (charging), Studio Keyboard 82%."))
+            check("the Power explanation is given the accessories, by what they are and not by name", powerAsk.contains("Accessory batteries: Mouse 12%, Trackpad 64% (charging), Keyboard 82%.") && !powerAsk.contains("Desk Mouse"))
             shown.drive = nil
             shown.accessories = []
             check("and neither when there is nothing to say", !AnalysisPrompt.explainMessage(section: .storage, snapshot: shown, history: [], storage: nil, timeline: nil, question: nil, extra: nil).contains("SMART")
